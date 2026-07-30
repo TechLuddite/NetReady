@@ -119,9 +119,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="text-lg sm:text-xl font-bold tracking-tight text-white whitespace-nowrap">
                     NetReady<span className="text-cyan-500">.local</span>
                   </span>
-                  <span className="hidden min-[480px]:inline-block px-2 py-0.5 text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full uppercase tracking-wider whitespace-nowrap">
-                    Client-Side Workstation
-                  </span>
                 </div>
                 <p className="text-[11px] text-slate-400 hidden sm:block truncate">
                   Browser-Native Diagnostics & Port Scanner Engine
