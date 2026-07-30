@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Activity,
   Gauge,
@@ -20,11 +20,13 @@ import {
   Archive,
   AlertTriangle,
   Compass,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo } from '../types';
 import { PrivacySafetyModal } from './PrivacySafetyModal';
 import { DevSupportModal } from './DevSupportModal';
-import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
+import { ResponsibleNetworkingModal } from './ResponsibleNetworkingModal';
 
 interface NavbarProps {
   activeTab: ToolTab;
@@ -42,6 +44,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showDevSupportModal, setShowDevSupportModal] = useState(false);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+
+  const navRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }> }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -62,60 +68,99 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const kbUsed = (storageBytes / 1024).toFixed(1);
 
+  const checkScroll = () => {
+    const el = navRef.current;
+    if (!el) return;
+    const scrollLeft = el.scrollLeft;
+    const maxScrollLeft = el.scrollWidth - el.clientWidth;
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft < maxScrollLeft - 4);
+  };
+
+  useEffect(() => {
+    checkScroll();
+    const el = navRef.current;
+    if (el) {
+      el.addEventListener('scroll', checkScroll, { passive: true });
+    }
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      if (el) el.removeEventListener('scroll', checkScroll);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    checkScroll();
+    const activeEl = navRef.current?.querySelector('[data-active="true"]');
+    if (activeEl) {
+      activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+  }, [activeTab]);
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (!navRef.current) return;
+    const scrollAmount = direction === 'left' ? -220 : 220;
+    navRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+  };
+
   return (
     <>
       <header className="bg-black/40 backdrop-blur-md border-b border-white/5 sticky top-0 z-50 text-slate-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Top Brand Bar */}
-          <div className="flex items-center justify-between h-16 border-b border-white/5">
-            <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-              <div className="w-9 h-9 rounded-xl bg-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.5)]">
-                <Activity className="w-5 h-5 text-black font-bold" />
+          <div className="flex items-center justify-between min-h-[4rem] py-2 sm:py-0 h-auto sm:h-16 border-b border-white/5 gap-2">
+            <div className="flex items-center space-x-2.5 sm:space-x-3 cursor-pointer min-w-0" onClick={() => setActiveTab('dashboard')}>
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.5)] flex-shrink-0">
+                <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-black font-bold" />
               </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-xl font-bold tracking-tight text-white">
+              <div className="min-w-0">
+                <div className="flex items-center space-x-2 flex-wrap sm:flex-nowrap">
+                  <span className="text-lg sm:text-xl font-bold tracking-tight text-white whitespace-nowrap">
                     NetReady<span className="text-cyan-500">.local</span>
                   </span>
-                  <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full uppercase tracking-wider">
+                  <span className="hidden min-[480px]:inline-block px-2 py-0.5 text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full uppercase tracking-wider whitespace-nowrap">
                     Client-Side Workstation
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 hidden sm:block">
+                <p className="text-[11px] text-slate-400 hidden sm:block truncate">
                   Browser-Native Diagnostics & Port Scanner Engine
                 </p>
               </div>
             </div>
 
             {/* Action Buttons & Status Indicators */}
-            <div className="flex items-center space-x-2.5">
+            <div className="flex items-center space-x-1.5 sm:space-x-2.5 flex-shrink-0">
               {/* Responsible Networking Warning Button */}
               <button
                 onClick={() => setShowResponsibleModal(true)}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all cursor-pointer"
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 py-1 sm:px-3 rounded-full text-xs font-mono bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all cursor-pointer"
                 title="Responsible Networking & Scanning Disclaimer"
+                aria-label="Responsible Networking Disclaimer"
               >
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400 animate-pulse flex-shrink-0" />
                 <span className="hidden sm:inline font-semibold">Authorized Use Only</span>
               </button>
 
               {/* Privacy & Safety Modal Button */}
               <button
                 onClick={() => setShowPrivacyModal(true)}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 transition-all cursor-pointer"
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 py-1 sm:px-3 rounded-full text-xs font-mono bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 transition-all cursor-pointer"
                 title="View Privacy & Safety Statement"
+                aria-label="Privacy & Safety"
               >
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
                 <span className="hidden sm:inline font-semibold">Privacy & Safety</span>
               </button>
 
               {/* Support / Donate Modal Button */}
               <button
                 onClick={() => setShowDevSupportModal(true)}
-                className="flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 transition-all cursor-pointer"
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 py-1 sm:px-3 rounded-full text-xs font-mono bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 transition-all cursor-pointer"
                 title="Support Open Source Development"
+                aria-label="Support Dev"
               >
-                <Heart className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                <Heart className="w-3.5 h-3.5 text-rose-400 animate-pulse flex-shrink-0" />
                 <span className="hidden sm:inline font-semibold">Support Dev</span>
               </button>
 
@@ -161,27 +206,65 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="flex space-x-1 overflow-x-auto py-2.5 scrollbar-none">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
+          {/* Navigation Tabs Bar Container */}
+          <div className="relative py-2">
+            {/* Left Fade & Arrow Indicator */}
+            {canScrollLeft && (
+              <div className="absolute left-0 top-0 bottom-0 z-20 flex items-center pr-8 pl-0.5 bg-gradient-to-r from-[#050608] via-[#050608]/90 to-transparent pointer-events-none transition-opacity duration-200">
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 ${
-                    isActive
-                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-semibold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                  }`}
+                  onClick={() => scrollTabs('left')}
+                  className="pointer-events-auto p-1.5 rounded-full bg-slate-900/90 hover:bg-slate-800 text-cyan-400 border border-cyan-500/30 shadow-[0_0_10px_rgba(0,0,0,0.8)] transition-all transform hover:scale-110 active:scale-95 cursor-pointer flex items-center justify-center"
+                  title="Scroll left for previous tools"
+                  aria-label="Scroll left"
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                  <span>{tab.label}</span>
+                  <ChevronLeft className="w-4 h-4 text-cyan-300 stroke-[2.5]" />
                 </button>
-              );
-            })}
-          </nav>
+              </div>
+            )}
+
+            {/* Scrollable Navigation Bar */}
+            <nav
+              ref={navRef}
+              className="flex space-x-1 overflow-x-auto py-1 no-scrollbar scroll-smooth"
+            >
+              {tabs.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    data-active={isActive}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer flex-shrink-0 ${
+                      isActive
+                        ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-semibold shadow-[0_0_10px_rgba(6,182,212,0.15)]'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Right Fade & Strong Glowing Arrow Indicator */}
+            {canScrollRight && (
+              <div className="absolute right-0 top-0 bottom-0 z-20 flex items-center pl-8 pr-0.5 bg-gradient-to-l from-[#050608] via-[#050608]/95 to-transparent pointer-events-none transition-opacity duration-200">
+                <button
+                  onClick={() => scrollTabs('right')}
+                  className="pointer-events-auto flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-300 border border-cyan-400/60 shadow-[0_0_16px_rgba(6,182,212,0.7)] animate-pulse-glow transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+                  title="Scroll right to see more diagnostic tools"
+                  aria-label="Scroll right for more tools"
+                >
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-cyan-200 hidden xs:inline">
+                    More Tools
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-cyan-300 stroke-[3] animate-bounce-right" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

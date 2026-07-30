@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Radio, Play, StopCircle, RefreshCw, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { PingResult, PingPoint, HistoryItem } from '../types';
@@ -18,6 +18,13 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
   const [points, setPoints] = useState<PingPoint[]>([]);
   const [result, setResult] = useState<PingResult | null>(null);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+  const stopRequestedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      stopRequestedRef.current = true;
+    };
+  }, []);
 
   const getActiveUrlAndLabel = () => {
     if (customTarget.trim()) {
@@ -35,6 +42,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
   };
 
   const executePing = async () => {
+    stopRequestedRef.current = false;
     setIsPinging(true);
     setPoints([]);
     setResult(null);
@@ -48,23 +56,65 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
         packetCount,
         (pt, currentPoints) => {
           setPoints(currentPoints);
-        }
+
+          // Compute live metrics so cards update in real-time
+          const valid = currentPoints.filter((p) => p.status === 'success' && p.time > 0);
+          const sent = currentPoints.length;
+          const received = valid.length;
+          const packetLoss = sent > 0 ? Math.round(((sent - received) / sent) * 100) : 0;
+          let minPing = 0;
+          let maxPing = 0;
+          let avgPing = 0;
+          let jitter = 0;
+
+          if (valid.length > 0) {
+            const times = valid.map((p) => p.time);
+            minPing = Math.min(...times);
+            maxPing = Math.max(...times);
+            avgPing = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+            if (times.length > 1) {
+              let diffSum = 0;
+              for (let k = 0; k < times.length - 1; k++) {
+                diffSum += Math.abs(times[k + 1] - times[k]);
+              }
+              jitter = Math.round(diffSum / (times.length - 1));
+            }
+          }
+
+          setResult({
+            id: 'ping_live',
+            timestamp: Date.now(),
+            target: url,
+            label,
+            packetsSent: sent,
+            packetsReceived: received,
+            packetLoss,
+            minPing,
+            maxPing,
+            avgPing,
+            jitter,
+            points: currentPoints,
+          });
+        },
+        () => stopRequestedRef.current
       );
 
       setResult(res);
 
-      // Save to LocalStorage
-      const item: HistoryItem = {
-        id: res.id,
-        type: 'ping',
-        timestamp: res.timestamp,
-        title: `Ping ${res.label}: Avg ${res.avgPing} ms`,
-        summary: `Min: ${res.minPing}ms | Max: ${res.maxPing}ms | Jitter: ${res.jitter}ms | Loss: ${res.packetLoss}%`,
-        data: res,
-      };
+      // Save to LocalStorage if packets were sent
+      if (res.packetsSent > 0) {
+        const item: HistoryItem = {
+          id: res.id,
+          type: 'ping',
+          timestamp: res.timestamp,
+          title: `Ping ${res.label}: Avg ${res.avgPing} ms${packetCount === 0 ? ' (Continuous)' : ''}`,
+          summary: `Min: ${res.minPing}ms | Max: ${res.maxPing}ms | Jitter: ${res.jitter}ms | Loss: ${res.packetLoss}% (${res.packetsSent} sent)`,
+          data: res,
+        };
 
-      saveHistoryItem(item);
-      onHistoryUpdate();
+        saveHistoryItem(item);
+        onHistoryUpdate();
+      }
     } catch (e) {
       console.error('Ping batch failed:', e);
     } finally {
@@ -73,6 +123,10 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
   };
 
   const handleStartPing = () => {
+    if (isPinging) {
+      stopRequestedRef.current = true;
+      return;
+    }
     if (!isResponsibleNetworkingAccepted()) {
       setShowResponsibleModal(true);
       return;
@@ -98,18 +152,23 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
 
         <button
           onClick={handleStartPing}
-          disabled={isPinging}
-          className="flex items-center space-x-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-blue-500/20 active:scale-95 disabled:opacity-50"
+          className={`flex items-center space-x-2 font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg active:scale-95 ${
+            isPinging
+              ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-500/20'
+              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white shadow-blue-500/20'
+          }`}
         >
           {isPinging ? (
             <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Pinging ({points.length}/{packetCount})...</span>
+              <StopCircle className="w-4 h-4 fill-white animate-pulse" />
+              <span>
+                Stop Ping {packetCount === 0 ? `(${points.length} sent)` : `(${points.length}/${packetCount})`}
+              </span>
             </>
           ) : (
             <>
               <Play className="w-4 h-4 fill-white" />
-              <span>Start Ping Sequence</span>
+              <span>{packetCount === 0 ? 'Start Continuous Ping' : 'Start Ping Sequence'}</span>
             </>
           )}
         </button>
@@ -128,6 +187,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             return (
               <button
                 key={preset.url}
+                disabled={isPinging}
                 onClick={() => {
                   setSelectedTarget(preset.url);
                   setCustomTarget('');
@@ -136,7 +196,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
                   isSelected
                     ? 'bg-blue-500/15 text-blue-300 border-blue-500/40 shadow-sm'
                     : 'bg-slate-800/60 hover:bg-slate-800 text-slate-300 border-slate-700/60'
-                }`}
+                } disabled:opacity-50`}
               >
                 <div className="font-semibold">{preset.name}</div>
                 <div className="text-[10px] text-slate-400 truncate mt-0.5">{preset.url}</div>
@@ -153,10 +213,11 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             </label>
             <input
               type="text"
+              disabled={isPinging}
               placeholder="e.g. https://api.github.com or my-router.local"
               value={customTarget}
               onChange={(e) => setCustomTarget(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono disabled:opacity-50"
             />
           </div>
 
@@ -166,12 +227,16 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             </label>
             <select
               value={packetCount}
+              disabled={isPinging}
               onChange={(e) => setPacketCount(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono disabled:opacity-50"
             >
               <option value={10}>10 Packets</option>
+              <option value={15}>15 Packets</option>
               <option value={20}>20 Packets</option>
               <option value={50}>50 Packets</option>
+              <option value={100}>100 Packets</option>
+              <option value={0}>Continuous Ping (∞ / -t)</option>
             </select>
           </div>
         </div>
@@ -217,14 +282,22 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
 
       {/* Live Ping Sequence Line Chart */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
-          Ping Latency Curve (ms per packet)
-        </h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+            Ping Latency Curve (ms per packet)
+          </h2>
+          {isPinging && packetCount === 0 && (
+            <span className="flex items-center space-x-1.5 px-2.5 py-1 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs font-mono rounded-lg">
+              <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+              <span>Continuous Active ({points.length} sent)</span>
+            </span>
+          )}
+        </div>
 
         <div className="h-64 w-full">
           {points.length === 0 ? (
             <div className="h-full flex items-center justify-center text-slate-500 text-xs border border-dashed border-slate-800 rounded-xl">
-              Click "Start Ping Sequence" to view sequence latency variations.
+              Click "{packetCount === 0 ? 'Start Continuous Ping' : 'Start Ping Sequence'}" to view sequence latency variations.
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
@@ -254,7 +327,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
       {points.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl overflow-x-auto">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300 mb-4">
-            Packet Sequence Log ({points.length} Sent)
+            Packet Sequence Log ({points.length} Sent{packetCount === 0 ? ' - Continuous Mode' : ''})
           </h2>
 
           <table className="w-full text-left border-collapse">

@@ -42,11 +42,17 @@ export async function executePingBatch(
   targetUrl: string,
   targetName: string,
   packetCount: number = 10,
-  onPoint?: (point: PingPoint, currentPoints: PingPoint[]) => void
+  onPoint?: (point: PingPoint, currentPoints: PingPoint[]) => void,
+  shouldStop?: () => boolean
 ): Promise<PingResult> {
   const points: PingPoint[] = [];
+  const isContinuous = packetCount <= 0 || !isFinite(packetCount);
 
-  for (let i = 1; i <= packetCount; i++) {
+  let i = 1;
+  while (true) {
+    if (shouldStop && shouldStop()) break;
+    if (!isContinuous && i > packetCount) break;
+
     const start = performance.now();
     try {
       // Add cache buster query param
@@ -86,6 +92,11 @@ export async function executePingBatch(
       points.push(pt);
       if (onPoint) onPoint(pt, [...points]);
     }
+
+    i++;
+
+    if (shouldStop && shouldStop()) break;
+    if (!isContinuous && i > packetCount) break;
 
     // Small delay between pings (120ms)
     await new Promise((res) => setTimeout(res, 120));

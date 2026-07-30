@@ -16,6 +16,41 @@
   }
 }
 
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(6, 182, 212, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(6, 182, 212, 0.95);
+  }
+}
+
+@keyframes bounceRight {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(3px);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 1.8s infinite ease-in-out;
+}
+
+.animate-bounce-right {
+  animation: bounceRight 1.2s infinite ease-in-out;
+}
+
+/* Hide scrollbars for toolbars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Custom Leaflet Dark Popup styling */
 .leaflet-popup-content-wrapper {
   background: #0f172a !important;
