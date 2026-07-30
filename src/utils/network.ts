@@ -986,24 +986,52 @@ export function parseTargetHosts(input: string): string[] {
   return [clean];
 }
 
+// Chrome & Firefox Restricted Ports (Blocked by browser security policy ERR_UNSAFE_PORT)
+const RESTRICTED_PORTS = [
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95,
+  101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161,
+  179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 563, 587,
+  601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000,
+  6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080,
+];
+
 export async function scanSinglePort(
   host: string,
   port: number,
-  timeoutMs: number = 1200
+  timeoutMs: number = 800
 ): Promise<PortStatus> {
   const cleanHost = host.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const foundDef = COMMON_PORTS.find((p) => p.port === port);
   const service = foundDef?.service || `Port ${port}`;
   const description = foundDef?.description || `Custom Port ${port}`;
 
+  const isWeb =
+    [80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port) ||
+    service.toLowerCase().includes('http');
+  const protocol: 'http' | 'https' = port === 443 || port === 8443 ? 'https' : 'http';
+
+  // If port is restricted by browser policy, classify as filtered (browser restricted)
+  if (RESTRICTED_PORTS.includes(port)) {
+    return {
+      host: cleanHost,
+      port,
+      status: 'filtered',
+      latencyMs: 0,
+      service: `${service} (Browser Restricted)`,
+      description: `${description} - Probing restricted by browser security policy.`,
+      isWeb,
+      protocol,
+    };
+  }
+
   const start = performance.now();
 
-  const probeWithFetch = async (protocol: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+  const probeWithFetch = async (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const url = `${protocol}://${cleanHost}:${port}/?_cb=${Math.random().toString(36).slice(2)}`;
+      const url = `${proto}://${cleanHost}:${port}/?_cb=${Math.random().toString(36).slice(2)}`;
       await fetch(url, {
         method: 'HEAD',
         mode: 'no-cors',
@@ -1014,20 +1042,27 @@ export async function scanSinglePort(
       return 'open';
     } catch (err: any) {
       clearTimeout(timer);
-      if (err.name === 'AbortError') {
+      const elapsed = performance.now() - start;
+
+      if (err.name === 'AbortError' || elapsed >= timeoutMs - 50) {
         return 'filtered';
       }
-      // Rapid rejection (< 200ms) indicates a network response (e.g. SSL cert rejection, CORS block, or HTTP 404/500 response)
-      // which confirms the TCP port is REACHABLE and OPEN.
-      const elapsed = performance.now() - start;
-      if (elapsed < 200) {
+
+      // If fetch failed on HTTPS port in 30ms-400ms (SSL cert error or HTTP/SSL protocol mismatch), the port is OPEN
+      if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
         return 'open';
       }
-      return 'closed';
+
+      // Fast rejection (<30ms) indicates TCP RST returned by a live host with closed port
+      if (elapsed < 30) {
+        return 'closed';
+      }
+
+      return 'filtered';
     }
   };
 
-  const probeWithImage = (protocol: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+  const probeWithImage = (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
     return new Promise((resolve) => {
       let resolved = false;
       const img = new Image();
@@ -1039,7 +1074,7 @@ export async function scanSinglePort(
         }
       }, timeoutMs);
 
-      const finish = (s: 'open' | 'closed') => {
+      const finish = (s: 'open' | 'closed' | 'filtered') => {
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
@@ -1051,17 +1086,21 @@ export async function scanSinglePort(
       img.onload = () => finish('open');
       img.onerror = () => {
         const elapsed = performance.now() - start;
-        if (elapsed < 200) {
+        if (elapsed >= timeoutMs - 50) {
+          finish('filtered');
+        } else if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
           finish('open');
-        } else {
+        } else if (elapsed < 30) {
           finish('closed');
+        } else {
+          finish('filtered');
         }
       };
 
       try {
-        img.src = `${protocol}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
+        img.src = `${proto}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
       } catch (e) {
-        finish('closed');
+        finish('filtered');
       }
     });
   };
@@ -1089,25 +1128,26 @@ export async function scanSinglePort(
         ws.onopen = () => finish('open');
         ws.onerror = () => {
           const elapsed = performance.now() - start;
-          if (elapsed < 200) {
-            finish('open');
-          } else {
+          if (elapsed >= timeoutMs - 50) {
+            finish('filtered');
+          } else if (elapsed < 30) {
             finish('closed');
+          } else {
+            finish('filtered');
           }
         };
       } catch (e) {
-        finish('closed');
+        finish('filtered');
       }
     });
   };
 
   let status: 'open' | 'closed' | 'filtered' = 'filtered';
 
-  if ([80, 443, 3000, 5000, 8000, 8080, 8443].includes(port)) {
-    const proto = port === 443 || port === 8443 ? 'https' : 'http';
-    status = await probeWithFetch(proto);
+  if ([80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port)) {
+    status = await probeWithFetch(protocol);
     if (status === 'filtered') {
-      status = await probeWithImage(proto);
+      status = await probeWithImage(protocol);
     }
   } else {
     status = await probeWithWs();
@@ -1117,9 +1157,6 @@ export async function scanSinglePort(
   }
 
   const latencyMs = Math.round(performance.now() - start);
-
-  const isWeb = [80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port) || service.toLowerCase().includes('http');
-  const protocol: 'http' | 'https' = port === 443 || port === 8443 ? 'https' : 'http';
 
   return {
     host: cleanHost,
@@ -1133,59 +1170,97 @@ export async function scanSinglePort(
   };
 }
 
+export async function isHostAlive(host: string, timeoutMs: number = 700): Promise<boolean> {
+  const cleanHost = host.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  
+  // Try fast concurrent probes across HTTP (80), HTTPS (443), and Web Socket / HTTP (8080)
+  const probe80 = scanSinglePort(cleanHost, 80, timeoutMs);
+  const probe443 = scanSinglePort(cleanHost, 443, timeoutMs);
+  const probe8080 = scanSinglePort(cleanHost, 8080, timeoutMs);
+
+  const results = await Promise.all([probe80, probe443, probe8080]);
+  return results.some((r) => r.status === 'open' || r.status === 'closed');
+}
+
 export async function scanPortList(
   targetHost: string,
   ports: number[],
-  onProgress?: (scannedCount: number, total: number, lastResult: PortStatus) => void
+  onProgress?: (scannedCount: number, total: number, lastResult: PortStatus, phase?: 'discovery' | 'scanning') => void,
+  enableHostDiscovery: boolean = true
 ): Promise<PortScanResult> {
   const startTime = performance.now();
   const hosts = parseTargetHosts(targetHost);
-  const totalProbesCount = hosts.length * ports.length;
 
   const resultsMap: PortStatus[] = [];
   let openCount = 0;
   let closedCount = 0;
   let filteredCount = 0;
 
-  const enrichPortInfo = (
-    host: string,
-    port: number,
-    status: 'open' | 'closed' | 'filtered',
-    latencyMs: number
-  ): PortStatus => {
-    const foundDef = COMMON_PORTS.find((p) => p.port === port);
-    const service = foundDef?.service || `Port ${port}`;
-    const description = foundDef?.description || `Custom Port ${port}`;
+  let hostsToScan = hosts;
 
-    const isWeb =
-      [80, 443, 3000, 5000, 8000, 8080, 8443, 8000, 8001, 8081, 8888, 9000].includes(port) ||
-      service.toLowerCase().includes('http') ||
-      service.toLowerCase().includes('web');
+  // Perform Host Discovery pre-check if scanning multiple hosts or enabled
+  if (enableHostDiscovery && hosts.length > 1) {
+    const aliveHosts: string[] = [];
+    const discoveryConcurrency = 12;
 
-    const protocol: 'http' | 'https' =
-      port === 443 || port === 8443 || service.toLowerCase().includes('https') ? 'https' : 'http';
+    for (let i = 0; i < hosts.length; i += discoveryConcurrency) {
+      const chunk = hosts.slice(i, i + discoveryConcurrency);
+      const chunkAlive = await Promise.all(
+        chunk.map(async (h) => {
+          const alive = await isHostAlive(h, 600);
+          return { host: h, alive };
+        })
+      );
 
-    return {
-      host,
-      port,
-      status,
-      latencyMs,
-      service,
-      description,
-      isWeb,
-      protocol,
-    };
-  };
+      for (const item of chunkAlive) {
+        if (item.alive) {
+          aliveHosts.push(item.host);
+        } else {
+          // Pre-populate offline hosts' ports as filtered to save time
+          for (const p of ports) {
+            resultsMap.push({
+              host: item.host,
+              port: p,
+              status: 'filtered',
+              latencyMs: 0,
+              service: COMMON_PORTS.find((cp) => cp.port === p)?.service || `Port ${p}`,
+              description: 'Host unreachable during discovery pre-check',
+              isWeb: [80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(p),
+              protocol: p === 443 || p === 8443 ? 'https' : 'http',
+            });
+            filteredCount++;
+          }
+        }
+      }
 
-  // Pure 100% Client-Side Browser Probing (Parallel chunks for speed)
+      if (onProgress) {
+        const dummyResult: PortStatus = {
+          host: chunk[chunk.length - 1],
+          port: 0,
+          status: 'filtered',
+          latencyMs: 0,
+          service: 'Host Discovery',
+          description: 'Ping & Multi-probe Host Discovery',
+          isWeb: false,
+          protocol: 'http',
+        };
+        onProgress(Math.min(i + discoveryConcurrency, hosts.length), hosts.length, dummyResult, 'discovery');
+      }
+    }
+
+    hostsToScan = aliveHosts;
+  }
+
+  // Probe ports on live hosts
   const probes: { host: string; port: number }[] = [];
-  for (const h of hosts) {
+  for (const h of hostsToScan) {
     for (const p of ports) {
       probes.push({ host: h, port: p });
     }
   }
 
-  let processedCount = 0;
+  const totalProbesCount = hosts.length * ports.length;
+  let processedCount = resultsMap.length;
   const concurrency = 6;
 
   for (let i = 0; i < probes.length; i += concurrency) {
@@ -1195,16 +1270,15 @@ export async function scanPortList(
     );
 
     for (const res of chunkResults) {
-      const enriched = enrichPortInfo(res.host, res.port, res.status, res.latencyMs);
-      resultsMap.push(enriched);
+      resultsMap.push(res);
 
-      if (enriched.status === 'open') openCount++;
-      else if (enriched.status === 'closed') closedCount++;
+      if (res.status === 'open') openCount++;
+      else if (res.status === 'closed') closedCount++;
       else filteredCount++;
 
       processedCount++;
       if (onProgress) {
-        onProgress(processedCount, totalProbesCount, enriched);
+        onProgress(processedCount, totalProbesCount, res, 'scanning');
       }
     }
   }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Radar,
   Play,
@@ -57,12 +57,15 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     total: number;
     currentPort?: number;
     currentHost?: string;
+    phase?: 'discovery' | 'scanning';
   }>({
     scanned: 0,
     total: 0,
+    phase: 'scanning',
   });
   const [activeResult, setActiveResult] = useState<PortScanResult | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed' | 'filtered'>('all');
+  const [hideOfflineHosts, setHideOfflineHosts] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [detectingSubnet, setDetectingSubnet] = useState(false);
   const [detectedSubnetInfo, setDetectedSubnetInfo] = useState<string | null>(null);
@@ -134,12 +137,13 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     setScanProgress({ scanned: 0, total: 100 });
 
     try {
-      const res = await scanPortList(targetHost, portsToScan, (scanned, total, last) => {
+      const res = await scanPortList(targetHost, portsToScan, (scanned, total, last, phase) => {
         setScanProgress({
           scanned,
           total,
           currentPort: last.port,
           currentHost: last.host,
+          phase: phase || 'scanning',
         });
       });
 
@@ -172,8 +176,40 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     executeScan();
   };
 
+  // Calculate sets of totally offline/unresponsive hosts (where 100% of probed ports are 'filtered')
+  const offlineHostsSet = useMemo(() => {
+    if (!activeResult) return new Set<string>();
+    const hostStatusMap: Record<string, { total: number; filtered: number }> = {};
+    for (const p of activeResult.ports) {
+      if (!hostStatusMap[p.host]) {
+        hostStatusMap[p.host] = { total: 0, filtered: 0 };
+      }
+      hostStatusMap[p.host].total += 1;
+      if (p.status === 'filtered') {
+        hostStatusMap[p.host].filtered += 1;
+      }
+    }
+    const deadHosts = new Set<string>();
+    for (const [host, counts] of Object.entries(hostStatusMap)) {
+      if (counts.total > 0 && counts.filtered === counts.total) {
+        deadHosts.add(host);
+      }
+    }
+    return deadHosts;
+  }, [activeResult]);
+
   const filteredPorts = activeResult
     ? activeResult.ports.filter((p) => {
+        // If hideOfflineHosts is enabled and scanning multiple hosts, hide totally unresponsive hosts unless viewing filtered specifically
+        if (
+          hideOfflineHosts &&
+          filterStatus !== 'filtered' &&
+          activeResult.scannedHosts.length > 1 &&
+          offlineHostsSet.has(p.host)
+        ) {
+          return false;
+        }
+
         const matchesStatus = filterStatus === 'all' || p.status === filterStatus;
         const matchesSearch =
           p.host.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -394,11 +430,18 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-cyan-300 font-bold flex items-center space-x-2">
               <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
-              <span>Scanning target: {scanProgress.currentHost || targetHost}...</span>
+              <span>
+                {scanProgress.phase === 'discovery'
+                  ? `Phase 1: Host Discovery Sweep (Ping / HTTP / TCP Probes)... Host ${scanProgress.currentHost || targetHost}`
+                  : `Phase 2: Scanning Ports on Active Hosts... ${scanProgress.currentHost || targetHost}`}
+              </span>
             </span>
             <span className="text-slate-300">
-              Probing port: <strong className="text-white">#{scanProgress.currentPort || '---'}</strong> (
-              {scanProgress.scanned} / {scanProgress.total})
+              {scanProgress.phase === 'discovery' ? (
+                <>Checked: <strong className="text-cyan-300">{scanProgress.scanned} / {scanProgress.total} Hosts</strong></>
+              ) : (
+                <>Probing port: <strong className="text-white">#{scanProgress.currentPort || '---'}</strong> ({scanProgress.scanned} / {scanProgress.total})</>
+              )}
             </span>
           </div>
 
@@ -515,24 +558,41 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
           )}
 
           {/* Filter & Search Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-xl border border-white/10 text-xs font-mono w-full sm:w-auto">
-              {(['all', 'open', 'closed', 'filtered'] as const).map((status) => (
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-xl border border-white/10 text-xs font-mono">
+                {(['all', 'open', 'closed', 'filtered'] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-3 py-1.5 rounded-lg uppercase transition-all font-semibold cursor-pointer ${
+                      filterStatus === status
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {status} ({status === 'all' ? activeResult.ports.length : activeResult.ports.filter((p) => p.status === status).length})
+                  </button>
+                ))}
+              </div>
+
+              {activeResult.scannedHosts.length > 1 && (
                 <button
-                  key={status}
-                  onClick={() => setFilterStatus(status)}
-                  className={`px-3 py-1.5 rounded-lg uppercase transition-all font-semibold cursor-pointer ${
-                    filterStatus === status
-                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                      : 'text-slate-400 hover:text-slate-200'
+                  onClick={() => setHideOfflineHosts(!hideOfflineHosts)}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-mono transition-colors flex items-center space-x-1.5 cursor-pointer ${
+                    hideOfflineHosts
+                      ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
+                      : 'bg-slate-950 border-white/10 text-slate-400 hover:text-slate-200'
                   }`}
+                  title="Toggle hiding unresponsive host IPs from subnet scan results"
                 >
-                  {status} ({status === 'all' ? activeResult.ports.length : activeResult.ports.filter((p) => p.status === status).length})
+                  <Filter className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Hide Offline Hosts ({offlineHostsSet.size})</span>
                 </button>
-              ))}
+              )}
             </div>
 
-            <div className="relative w-full sm:w-64">
+            <div className="relative w-full md:w-64">
               <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
               <input
                 type="text"
