@@ -155,11 +155,14 @@ export interface WebSocketResult {
 }
 
 export interface PortStatus {
+  host: string;
   port: number;
   status: 'open' | 'closed' | 'filtered';
   latencyMs: number;
   service?: string;
   description?: string;
+  isWeb?: boolean;
+  protocol?: 'http' | 'https';
 }
 
 export interface PortScanResult {
@@ -167,12 +170,15 @@ export interface PortScanResult {
   timestamp: number;
   targetHost: string;
   subnet?: string;
+  scannedHosts: string[];
   scannedPorts: number[];
   openPortsCount: number;
   closedPortsCount: number;
   filteredPortsCount: number;
+  discoveredHostsCount: number;
   ports: PortStatus[];
   scanDurationMs: number;
+  scanEngine?: 'server' | 'browser';
 }
 
 export interface TracertHop {

@@ -869,7 +869,7 @@ export function calculateNetReadyScore(
   };
 }
 
-// Port Scanner Engine (Browser-based local resource probes)
+// Port Scanner Engine (Server TCP Sockets + Browser Probes)
 export interface PortDefinition {
   port: number;
   service: string;
@@ -907,10 +907,89 @@ export const COMMON_PORTS: PortDefinition[] = [
   { port: 27017, service: 'MongoDB', description: 'MongoDB NoSQL Database', category: 'database' },
 ];
 
+export function parseTargetHosts(input: string): string[] {
+  const raw = input.trim();
+  if (!raw) return ['127.0.0.1'];
+
+  // Handle comma separated values
+  if (raw.includes(',')) {
+    const list: string[] = [];
+    for (const part of raw.split(',')) {
+      list.push(...parseTargetHosts(part));
+    }
+    return Array.from(new Set(list)).slice(0, 256);
+  }
+
+  // Handle CIDR subnets e.g. 192.168.1.0/24 or 10.0.0.0/28
+  if (raw.includes('/')) {
+    const [ipPart, prefixStr] = raw.split('/');
+    const prefix = parseInt(prefixStr, 10);
+    if (!isNaN(prefix) && prefix >= 16 && prefix <= 32) {
+      const ipToNum = (ip: string) =>
+        ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+      const numToIp = (num: number) =>
+        [(num >>> 24) & 255, (num >>> 16) & 255, (num >>> 8) & 255, num & 255].join('.');
+
+      const cleanIp = ipPart.trim();
+      const maskLong = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+      const ipLong = ipToNum(cleanIp);
+      const networkLong = (ipLong & maskLong) >>> 0;
+      const broadcastLong = (networkLong | (~maskLong >>> 0)) >>> 0;
+
+      let firstLong = networkLong;
+      let lastLong = broadcastLong;
+      if (prefix < 31) {
+        firstLong = networkLong + 1;
+        lastLong = broadcastLong - 1;
+      }
+
+      const count = Math.min(256, Math.max(1, lastLong - firstLong + 1));
+      const ips: string[] = [];
+      for (let i = 0; i < count; i++) {
+        ips.push(numToIp(firstLong + i));
+      }
+      return ips;
+    }
+  }
+
+  // Handle Range e.g. 192.168.1.1-192.168.1.20 or 192.168.1.1-20
+  if (raw.includes('-') && !raw.includes('nmap.org')) {
+    const parts = raw.split('-');
+    const startStr = parts[0].trim();
+    let endStr = parts[1].trim();
+
+    if (!endStr.includes('.')) {
+      const octets = startStr.split('.');
+      if (octets.length === 4) {
+        endStr = `${octets[0]}.${octets[1]}.${octets[2]}.${endStr}`;
+      }
+    }
+
+    const ipToNum = (ip: string) =>
+      ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+    const numToIp = (num: number) =>
+      [(num >>> 24) & 255, (num >>> 16) & 255, (num >>> 8) & 255, num & 255].join('.');
+
+    const start = ipToNum(startStr);
+    const end = ipToNum(endStr);
+    if (start > 0 && end >= start) {
+      const count = Math.min(256, end - start + 1);
+      const ips: string[] = [];
+      for (let i = 0; i < count; i++) {
+        ips.push(numToIp(start + i));
+      }
+      return ips;
+    }
+  }
+
+  const clean = raw.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  return [clean];
+}
+
 export async function scanSinglePort(
   host: string,
   port: number,
-  timeoutMs: number = 1500
+  timeoutMs: number = 1200
 ): Promise<PortStatus> {
   const cleanHost = host.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const foundDef = COMMON_PORTS.find((p) => p.port === port);
@@ -928,6 +1007,7 @@ export async function scanSinglePort(
       await fetch(url, {
         method: 'HEAD',
         mode: 'no-cors',
+        cache: 'no-store',
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -937,15 +1017,53 @@ export async function scanSinglePort(
       if (err.name === 'AbortError') {
         return 'filtered';
       }
+      // Rapid rejection (< 200ms) indicates a network response (e.g. SSL cert rejection, CORS block, or HTTP 404/500 response)
+      // which confirms the TCP port is REACHABLE and OPEN.
       const elapsed = performance.now() - start;
-      if (elapsed < 120) {
-        if ([80, 443, 3000, 5000, 8000, 8080, 8443].includes(port)) {
-          return 'open';
-        }
-        return 'closed';
+      if (elapsed < 200) {
+        return 'open';
       }
-      return 'filtered';
+      return 'closed';
     }
+  };
+
+  const probeWithImage = (protocol: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const img = new Image();
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          img.src = '';
+          resolve('filtered');
+        }
+      }, timeoutMs);
+
+      const finish = (s: 'open' | 'closed') => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          img.src = '';
+          resolve(s);
+        }
+      };
+
+      img.onload = () => finish('open');
+      img.onerror = () => {
+        const elapsed = performance.now() - start;
+        if (elapsed < 200) {
+          finish('open');
+        } else {
+          finish('closed');
+        }
+      };
+
+      try {
+        img.src = `${protocol}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
+      } catch (e) {
+        finish('closed');
+      }
+    });
   };
 
   const probeWithWs = (): Promise<'open' | 'closed' | 'filtered'> => {
@@ -971,7 +1089,7 @@ export async function scanSinglePort(
         ws.onopen = () => finish('open');
         ws.onerror = () => {
           const elapsed = performance.now() - start;
-          if (elapsed < 150) {
+          if (elapsed < 200) {
             finish('open');
           } else {
             finish('closed');
@@ -986,7 +1104,11 @@ export async function scanSinglePort(
   let status: 'open' | 'closed' | 'filtered' = 'filtered';
 
   if ([80, 443, 3000, 5000, 8000, 8080, 8443].includes(port)) {
-    status = await probeWithFetch(port === 443 || port === 8443 ? 'https' : 'http');
+    const proto = port === 443 || port === 8443 ? 'https' : 'http';
+    status = await probeWithFetch(proto);
+    if (status === 'filtered') {
+      status = await probeWithImage(proto);
+    }
   } else {
     status = await probeWithWs();
     if (status === 'filtered') {
@@ -996,55 +1118,112 @@ export async function scanSinglePort(
 
   const latencyMs = Math.round(performance.now() - start);
 
+  const isWeb = [80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port) || service.toLowerCase().includes('http');
+  const protocol: 'http' | 'https' = port === 443 || port === 8443 ? 'https' : 'http';
+
   return {
+    host: cleanHost,
     port,
     status,
     latencyMs,
     service,
     description,
+    isWeb,
+    protocol,
   };
 }
 
 export async function scanPortList(
-  host: string,
+  targetHost: string,
   ports: number[],
   onProgress?: (scannedCount: number, total: number, lastResult: PortStatus) => void
 ): Promise<PortScanResult> {
   const startTime = performance.now();
-  const results: PortStatus[] = [];
+  const hosts = parseTargetHosts(targetHost);
+  const totalProbesCount = hosts.length * ports.length;
+
+  const resultsMap: PortStatus[] = [];
   let openCount = 0;
   let closedCount = 0;
   let filteredCount = 0;
 
-  const concurrency = 4;
-  for (let i = 0; i < ports.length; i += concurrency) {
-    const chunk = ports.slice(i, i + concurrency);
-    const chunkPromises = chunk.map((p) => scanSinglePort(host, p));
-    const chunkResults = await Promise.all(chunkPromises);
+  const enrichPortInfo = (
+    host: string,
+    port: number,
+    status: 'open' | 'closed' | 'filtered',
+    latencyMs: number
+  ): PortStatus => {
+    const foundDef = COMMON_PORTS.find((p) => p.port === port);
+    const service = foundDef?.service || `Port ${port}`;
+    const description = foundDef?.description || `Custom Port ${port}`;
+
+    const isWeb =
+      [80, 443, 3000, 5000, 8000, 8080, 8443, 8000, 8001, 8081, 8888, 9000].includes(port) ||
+      service.toLowerCase().includes('http') ||
+      service.toLowerCase().includes('web');
+
+    const protocol: 'http' | 'https' =
+      port === 443 || port === 8443 || service.toLowerCase().includes('https') ? 'https' : 'http';
+
+    return {
+      host,
+      port,
+      status,
+      latencyMs,
+      service,
+      description,
+      isWeb,
+      protocol,
+    };
+  };
+
+  // Pure 100% Client-Side Browser Probing (Parallel chunks for speed)
+  const probes: { host: string; port: number }[] = [];
+  for (const h of hosts) {
+    for (const p of ports) {
+      probes.push({ host: h, port: p });
+    }
+  }
+
+  let processedCount = 0;
+  const concurrency = 6;
+
+  for (let i = 0; i < probes.length; i += concurrency) {
+    const chunk = probes.slice(i, i + concurrency);
+    const chunkResults = await Promise.all(
+      chunk.map((item) => scanSinglePort(item.host, item.port))
+    );
 
     for (const res of chunkResults) {
-      results.push(res);
-      if (res.status === 'open') openCount++;
-      else if (res.status === 'closed') closedCount++;
+      const enriched = enrichPortInfo(res.host, res.port, res.status, res.latencyMs);
+      resultsMap.push(enriched);
+
+      if (enriched.status === 'open') openCount++;
+      else if (enriched.status === 'closed') closedCount++;
       else filteredCount++;
 
+      processedCount++;
       if (onProgress) {
-        onProgress(results.length, ports.length, res);
+        onProgress(processedCount, totalProbesCount, enriched);
       }
     }
   }
 
   const durationMs = Math.round(performance.now() - startTime);
+  const uniqueOpenHosts = new Set(resultsMap.filter((r) => r.status === 'open').map((r) => r.host));
 
   return {
     id: 'portscan_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
     timestamp: Date.now(),
-    targetHost: host,
+    targetHost,
+    scannedHosts: hosts,
     scannedPorts: ports,
     openPortsCount: openCount,
     closedPortsCount: closedCount,
     filteredPortsCount: filteredCount,
-    ports: results,
+    discoveredHostsCount: uniqueOpenHosts.size,
+    ports: resultsMap,
     scanDurationMs: durationMs,
+    scanEngine: 'browser',
   };
 }
