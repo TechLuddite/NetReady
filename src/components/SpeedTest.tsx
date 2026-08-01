@@ -32,8 +32,8 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
   const [currentUpload, setCurrentUpload] = useState(0);
   const [currentPing, setCurrentPing] = useState(0);
   const [currentJitter, setCurrentJitter] = useState(0);
-  const [serverTarget, setServerTarget] = useState<SpeedTestServerTarget>('auto');
-  const [serverName, setServerName] = useState<string>('Auto-Select Best Endpoint');
+  const [serverTarget, setServerTarget] = useState<SpeedTestServerTarget>('cloudflare');
+  const [serverName, setServerName] = useState<string>('Cloudflare Global Edge CDN');
   const [bytesDownloaded, setBytesDownloaded] = useState<number>(0);
   const [bytesUploaded, setBytesUploaded] = useState<number>(0);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
@@ -208,7 +208,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
                 : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700/60'
             }`}
           >
-            Cloudflare CDN Edge
+            Cloudflare CDN Edge (Default)
           </button>
         </div>
       </div>

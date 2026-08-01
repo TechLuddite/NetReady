@@ -74,8 +74,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const pingRes = await executePingBatch('https://1.1.1.1/cdn-cgi/trace', 'Cloudflare (1.1.1.1)', 8);
       setLatestPing(pingRes);
 
-      setAuditStep('2/3 Measuring Download & Upload Bandwidth...');
-      const speedRes = await runSpeedTest();
+      setAuditStep('2/3 Measuring Bandwidth via Cloudflare CDN Edge...');
+      const speedRes = await runSpeedTest(undefined, 'cloudflare');
       setLatestSpeed(speedRes);
 
       setAuditStep('3/3 Gathering WebRTC ICE & DoH Diagnostics...');
@@ -91,7 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         type: 'speedtest',
         timestamp: Date.now(),
         title: `Full Audit: Grade ${score.grade} (${score.overallScore}%)`,
-        summary: `Download: ${speedRes.downloadSpeed} Mbps | Ping: ${pingRes.avgPing} ms | Jitter: ${pingRes.jitter} ms`,
+        summary: `Cloudflare CDN | Download: ${speedRes.downloadSpeed} Mbps | Ping: ${pingRes.avgPing} ms | Jitter: ${pingRes.jitter} ms`,
         data: speedRes,
       };
 
@@ -148,7 +148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Network Readiness Score
               </h1>
               <p className="text-xs text-slate-400 max-w-lg leading-relaxed">
-                Calculated using browser-native metrics, ping roundtrips, jitter variance, and bandwidth throughput.
+                Calculated using browser-native metrics, ping roundtrips, jitter variance, and bandwidth throughput benchmarked via Cloudflare CDN Edge.
               </p>
             </div>
 

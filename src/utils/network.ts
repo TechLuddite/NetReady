@@ -162,7 +162,7 @@ export interface SpeedTestProgressData {
 
 export async function runSpeedTest(
   onProgress?: (data: SpeedTestProgressData) => void,
-  serverTarget: SpeedTestServerTarget = 'auto'
+  serverTarget: SpeedTestServerTarget = 'cloudflare'
 ): Promise<SpeedTestResult> {
   let downloadSpeed = 0;
   let uploadSpeed = 0;
