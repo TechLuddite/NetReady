@@ -51,6 +51,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
   const [customPortInput, setCustomPortInput] = useState('80, 443, 3000-3005, 8080');
   const [portSelectionMode, setPortSelectionMode] = useState<'preset' | 'custom'>('preset');
 
+  const [showBetaDetails, setShowBetaDetails] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
     scanned: number;
@@ -242,15 +243,18 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
         <div className="absolute -top-12 -right-12 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10">
-          <div className="flex items-center space-x-2.5 mb-1.5">
+          <div className="flex items-center space-x-2.5 mb-1.5 flex-wrap gap-y-1">
             <div className="p-2 bg-cyan-500/10 border border-cyan-500/30 rounded-xl text-cyan-400">
               <Radar className="w-5 h-5 animate-pulse" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-white">
               TCP Socket & Subnet Port Scanner
             </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider">
+              BETA FEATURE
+            </span>
             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-              Client-Side Browser Engine
+              Client-Side Engine
             </span>
           </div>
           <p className="text-xs text-slate-400 max-w-xl leading-relaxed">
@@ -275,6 +279,56 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
             </>
           )}
         </button>
+      </div>
+
+      {/* BETA Security & Certificate Notice Banner */}
+      <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-lg space-y-3 backdrop-blur-sm">
+        <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+          <div className="flex items-start space-x-3">
+            <div className="p-2 bg-amber-500/20 rounded-xl text-amber-400 shrink-0 mt-0.5 border border-amber-500/30">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                <h3 className="text-sm font-bold text-amber-200">
+                  Browser Port Scanner (BETA Notice & Dev Console Security Logging)
+                </h3>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-500/30 text-amber-200 border border-amber-400/50">
+                  BETA
+                </span>
+              </div>
+              <p className="text-xs text-amber-200/90 leading-relaxed">
+                This feature runs entirely inside your browser client sandbox. Because web browsers enforce strict security policies, probing HTTPS/TLS ports or untrusted/self-signed cert endpoints will trigger expected browser security log warnings in DevTools console (such as <code className="font-mono text-amber-300 bg-black/40 px-1 py-0.5 rounded">ERR_CERT_AUTHORITY_INVALID</code>, <code className="font-mono text-amber-300 bg-black/40 px-1 py-0.5 rounded">ERR_SSL_PROTOCOL_ERROR</code>, or <code className="font-mono text-amber-300 bg-black/40 px-1 py-0.5 rounded">net::ERR_FAILED</code>). These console messages are native browser security logs and do not impede scanner operations.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowBetaDetails(!showBetaDetails)}
+            className="text-xs font-mono font-semibold text-amber-300 hover:text-amber-100 underline shrink-0 cursor-pointer self-start"
+          >
+            {showBetaDetails ? 'Hide Technical Details' : 'View Technical Details'}
+          </button>
+        </div>
+
+        {showBetaDetails && (
+          <div className="pt-3 border-t border-amber-500/20 font-mono text-[11px] text-amber-200/80 space-y-2 leading-relaxed bg-black/30 p-3.5 rounded-xl border border-amber-500/20">
+            <div className="font-bold text-amber-300 uppercase tracking-wider text-[10px] flex items-center space-x-1.5">
+              <span>Technical Explanation of Browser Sandbox Probing & Cert Logs:</span>
+            </div>
+            <ul className="list-disc list-inside space-y-1.5 text-slate-300">
+              <li>
+                <strong className="text-amber-200">No Raw Socket API in Browsers:</strong> Client-side JavaScript cannot create arbitrary raw TCP sockets without a backend agent. To probe ports safely in-browser, NetReady uses low-level fetch timing and WebSocket handshake attempts.
+              </li>
+              <li>
+                <strong className="text-amber-200">Native Console Security Logs:</strong> When probing HTTPS endpoints on ports like 443 or 8443 without valid trusted certificates, the browser's underlying network stack logs a certificate error to the Developer Console before passing the status to JavaScript. NetReady safely catches these rejections to determine port status.
+              </li>
+              <li>
+                <strong className="text-amber-200">CORS Policy Rejections:</strong> Cross-origin requests to non-CORS enabled hosts emit benign CORS console notices. These are normal browser security behaviors when running client-side port diagnostics.
+              </li>
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Target & Port Selection Form */}

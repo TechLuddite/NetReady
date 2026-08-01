@@ -341,9 +341,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-400 flex items-center justify-center mb-3 group-hover:bg-cyan-500 group-hover:text-slate-950 transition-colors">
               <Radar className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-slate-100 mb-1 group-hover:text-cyan-400 transition-colors">
-              Local Port Scanner
-            </h3>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-slate-100 group-hover:text-cyan-400 transition-colors">
+                Local Port Scanner
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded uppercase">
+                BETA
+              </span>
+            </div>
             <p className="text-xs text-slate-400 line-clamp-2">
               Probe host IPs, dev servers, or subnets for open TCP socket services using browser resources.
             </p>

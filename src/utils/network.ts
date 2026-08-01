@@ -1026,148 +1026,162 @@ export async function scanSinglePort(
 
   const start = performance.now();
 
-  const probeWithFetch = async (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const probeWithFetch = async (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const url = `${proto}://${cleanHost}:${port}/?_cb=${Math.random().toString(36).slice(2)}`;
-      await fetch(url, {
-        method: 'HEAD',
-        mode: 'no-cors',
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      return 'open';
-    } catch (err: any) {
-      clearTimeout(timer);
-      const elapsed = performance.now() - start;
+      try {
+        const url = `${proto}://${cleanHost}:${port}/?_cb=${Math.random().toString(36).slice(2)}`;
+        await fetch(url, {
+          method: 'HEAD',
+          mode: 'no-cors',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        return 'open';
+      } catch (err: any) {
+        clearTimeout(timer);
+        const elapsed = performance.now() - start;
 
-      if (err.name === 'AbortError' || elapsed >= timeoutMs - 50) {
+        if (err.name === 'AbortError' || elapsed >= timeoutMs - 50) {
+          return 'filtered';
+        }
+
+        // If fetch failed on HTTPS port in 20ms-500ms (SSL cert error or HTTP/SSL protocol mismatch), the port is OPEN
+        if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
+          return 'open';
+        }
+
+        // Fast rejection (<30ms) indicates TCP RST returned by a live host with closed port
+        if (elapsed < 30) {
+          return 'closed';
+        }
+
         return 'filtered';
       }
+    };
 
-      // If fetch failed on HTTPS port in 30ms-400ms (SSL cert error or HTTP/SSL protocol mismatch), the port is OPEN
-      if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
-        return 'open';
-      }
+    const probeWithImage = (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+      return new Promise((resolve) => {
+        let resolved = false;
+        const img = new Image();
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            img.src = '';
+            resolve('filtered');
+          }
+        }, timeoutMs);
 
-      // Fast rejection (<30ms) indicates TCP RST returned by a live host with closed port
-      if (elapsed < 30) {
-        return 'closed';
-      }
+        const finish = (s: 'open' | 'closed' | 'filtered') => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            img.src = '';
+            resolve(s);
+          }
+        };
 
-      return 'filtered';
-    }
-  };
-
-  const probeWithImage = (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
-    return new Promise((resolve) => {
-      let resolved = false;
-      const img = new Image();
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          img.src = '';
-          resolve('filtered');
-        }
-      }, timeoutMs);
-
-      const finish = (s: 'open' | 'closed' | 'filtered') => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          img.src = '';
-          resolve(s);
-        }
-      };
-
-      img.onload = () => finish('open');
-      img.onerror = () => {
-        const elapsed = performance.now() - start;
-        if (elapsed >= timeoutMs - 50) {
-          finish('filtered');
-        } else if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
-          finish('open');
-        } else if (elapsed < 30) {
-          finish('closed');
-        } else {
-          finish('filtered');
-        }
-      };
-
-      try {
-        img.src = `${proto}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
-      } catch (e) {
-        finish('filtered');
-      }
-    });
-  };
-
-  const probeWithWs = (): Promise<'open' | 'closed' | 'filtered'> => {
-    return new Promise((resolve) => {
-      let ws: WebSocket | null = null;
-      let timer: any = null;
-
-      const finish = (s: 'open' | 'closed' | 'filtered') => {
-        if (timer) clearTimeout(timer);
-        if (ws) {
-          try {
-            ws.close();
-          } catch (e) {}
-          ws = null;
-        }
-        resolve(s);
-      };
-
-      timer = setTimeout(() => finish('filtered'), timeoutMs);
-
-      try {
-        ws = new WebSocket(`ws://${cleanHost}:${port}`);
-        ws.onopen = () => finish('open');
-        ws.onerror = () => {
+        img.onload = () => finish('open');
+        img.onerror = () => {
           const elapsed = performance.now() - start;
           if (elapsed >= timeoutMs - 50) {
             finish('filtered');
+          } else if (proto === 'https' && elapsed >= 20 && elapsed < 500) {
+            finish('open');
           } else if (elapsed < 30) {
             finish('closed');
           } else {
             finish('filtered');
           }
         };
-      } catch (e) {
-        finish('filtered');
+
+        try {
+          img.src = `${proto}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
+        } catch (e) {
+          finish('filtered');
+        }
+      });
+    };
+
+    const probeWithWs = (): Promise<'open' | 'closed' | 'filtered'> => {
+      return new Promise((resolve) => {
+        let ws: WebSocket | null = null;
+        let timer: any = null;
+
+        const finish = (s: 'open' | 'closed' | 'filtered') => {
+          if (timer) clearTimeout(timer);
+          if (ws) {
+            try {
+              ws.close();
+            } catch (e) {}
+            ws = null;
+          }
+          resolve(s);
+        };
+
+        timer = setTimeout(() => finish('filtered'), timeoutMs);
+
+        try {
+          ws = new WebSocket(`ws://${cleanHost}:${port}`);
+          ws.onopen = () => finish('open');
+          ws.onerror = () => {
+            const elapsed = performance.now() - start;
+            if (elapsed >= timeoutMs - 50) {
+              finish('filtered');
+            } else if (elapsed < 30) {
+              finish('closed');
+            } else {
+              finish('filtered');
+            }
+          };
+        } catch (e) {
+          finish('filtered');
+        }
+      });
+    };
+
+    let status: 'open' | 'closed' | 'filtered' = 'filtered';
+
+    if ([80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port)) {
+      status = await probeWithFetch(protocol);
+      if (status === 'filtered') {
+        status = await probeWithImage(protocol);
       }
-    });
-  };
-
-  let status: 'open' | 'closed' | 'filtered' = 'filtered';
-
-  if ([80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(port)) {
-    status = await probeWithFetch(protocol);
-    if (status === 'filtered') {
-      status = await probeWithImage(protocol);
+    } else {
+      status = await probeWithWs();
+      if (status === 'filtered') {
+        status = await probeWithFetch('http');
+      }
     }
-  } else {
-    status = await probeWithWs();
-    if (status === 'filtered') {
-      status = await probeWithFetch('http');
-    }
+
+    const latencyMs = Math.round(performance.now() - start);
+
+    return {
+      host: cleanHost,
+      port,
+      status,
+      latencyMs,
+      service,
+      description,
+      isWeb,
+      protocol,
+    };
+  } catch (err) {
+    const latencyMs = Math.round(performance.now() - start);
+    return {
+      host: cleanHost,
+      port,
+      status: 'filtered',
+      latencyMs,
+      service,
+      description: `${description} - Probing error caught safely in browser engine`,
+      isWeb,
+      protocol,
+    };
   }
-
-  const latencyMs = Math.round(performance.now() - start);
-
-  return {
-    host: cleanHost,
-    port,
-    status,
-    latencyMs,
-    service,
-    description,
-    isWeb,
-    protocol,
-  };
 }
 
 export async function isHostAlive(host: string, timeoutMs: number = 700): Promise<boolean> {

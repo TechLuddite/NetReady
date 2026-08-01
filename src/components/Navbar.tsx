@@ -49,10 +49,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }> }[] = [
+  const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }>; badge?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'tracert', label: 'Tracert Hop Map', icon: GitCommit },
-    { id: 'portscanner', label: 'Port Scanner', icon: Radar },
+    { id: 'portscanner', label: 'Port Scanner', icon: Radar, badge: 'BETA' },
     { id: 'geoip', label: 'GeoIP Lookup', icon: Compass },
     { id: 'speedtest', label: 'Speed Test', icon: Gauge },
     { id: 'ping', label: 'Ping & Jitter', icon: Radio },
@@ -232,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     key={tab.id}
                     data-active={isActive}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer flex-shrink-0 ${
+                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer flex-shrink-0 ${
                       isActive
                         ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-semibold shadow-[0_0_10px_rgba(6,182,212,0.15)]'
                         : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
@@ -240,6 +240,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
                     <span>{tab.label}</span>
+                    {tab.badge && (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase">
+                        {tab.badge}
+                      </span>
+                    )}
                   </button>
                 );
               })}
