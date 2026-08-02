@@ -1,6 +1,48 @@
 import React from 'react';
 import { ShieldCheck, X, Lock, Database, EyeOff, Scale, CheckCircle2, AlertTriangle } from 'lucide-react';
 
+/**
+ * Every third party the browser contacts on NetReady's behalf, and what each
+ * one receives. Kept next to the privacy copy deliberately: if a new provider
+ * is added to the engine, this list is the thing that has to change with it.
+ */
+export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
+  {
+    host: 'speed.cloudflare.com',
+    receives: 'Your IP, plus tens of MB of transfer, whenever you run a speed test or full audit.',
+  },
+  {
+    host: 'cloudflare-dns.com / dns.google',
+    receives: 'Every domain name you resolve, over encrypted DNS-over-HTTPS.',
+  },
+  {
+    host: 'ipwho.is / ipapi.co / freeipapi.com',
+    receives:
+      'Your public IP when you open the GeoIP tool, and every IP or domain you look up or trace.',
+  },
+  {
+    host: '1.1.1.1, dns.quad9.net, doh.opendns.com, en.wikipedia.org',
+    receives: 'Your IP, as the targets of latency probes you choose to run.',
+  },
+  {
+    host: 'stun.l.google.com (and other STUN servers)',
+    receives: 'Your public IP, and potentially local network addresses, during WebRTC analysis.',
+  },
+  {
+    host: 'basemaps.cartocdn.com',
+    receives: 'The map area you view, which reveals the approximate location of a traced target.',
+  },
+  {
+    host: 'openstreetmap.org',
+    receives: 'Coordinates of a looked-up IP, via the embedded map frame on the GeoIP tool.',
+  },
+  {
+    host: 'Hosts you enter yourself',
+    receives:
+      'Direct connections from your browser and therefore your IP — this is what a scan or probe is.',
+  },
+];
+
 interface PrivacySafetyModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -59,10 +101,12 @@ export const PrivacySafetyModal: React.FC<PrivacySafetyModalProps> = ({ isOpen, 
             <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-2">
               <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-xs uppercase tracking-wider">
                 <EyeOff className="w-4 h-4" />
-                <span>Zero Server Telemetry</span>
+                <span>No NetReady Servers</span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                We do not collect, transmit, track, or record any IP addresses, scan targets, domain names, or diagnostic logs.
+                NetReady has no backend. Nothing is sent to, stored on, or logged by any server we
+                operate — because there isn&rsquo;t one. That is not the same as nothing leaving your
+                browser; see the list below.
               </p>
             </div>
 
@@ -98,27 +142,59 @@ export const PrivacySafetyModal: React.FC<PrivacySafetyModalProps> = ({ isOpen, 
             </p>
           </div>
 
-          {/* Feature Checklist */}
+          {/* The honest part.
+              A diagnostic tool cannot measure a network without touching it.
+              Claiming "we do not transmit any IP addresses, scan targets or
+              domain names" was flatly untrue: running a trace sends the target
+              IP to two GeoIP providers, opening the GeoIP tab sends your own
+              public IP before you click anything, and a speed test moves tens
+              of megabytes through Cloudflare. Listing that is more useful to a
+              privacy-conscious user than a reassuring sentence. */}
+          <div className="space-y-3 border-t border-white/5 pt-4">
+            <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400">
+              What leaves your browser, and to whom
+            </h4>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              These are direct browser-to-provider requests. NetReady never sees them, but the
+              providers do, and each is subject to its own privacy policy.
+            </p>
+            <div className="space-y-1.5 text-[11px] font-mono text-slate-300">
+              {THIRD_PARTY_DISCLOSURES.map((d) => (
+                <div
+                  key={d.host}
+                  className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3 py-1.5 border-b border-white/5 last:border-0"
+                >
+                  <span className="text-cyan-300 shrink-0 sm:w-52">{d.host}</span>
+                  <span className="text-slate-400 leading-relaxed">{d.receives}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Tools that need no network at all — the CIDR calculator, MAC/OUI lookup, stored
+              history and every export — contact nobody.
+            </p>
+          </div>
+
           <div className="space-y-2 border-t border-white/5 pt-4">
             <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400">
-              Security Guarantee Checklist
+              What NetReady itself does
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono text-slate-300">
               <div className="flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>No Third-Party Analytics Cookies</span>
+                <span>No analytics, no cookies, no trackers</span>
               </div>
               <div className="flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>No Backend Database Persistence</span>
+                <span>No backend, no account, no database</span>
               </div>
               <div className="flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Encrypted DoH (Cloudflare / Google)</span>
+                <span>DNS queries go out over encrypted DoH</span>
               </div>
               <div className="flex items-center space-x-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Instant Data Wipe via Clear Storage</span>
+                <span>Clearing site data erases everything</span>
               </div>
             </div>
           </div>

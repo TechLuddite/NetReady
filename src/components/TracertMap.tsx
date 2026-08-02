@@ -2,18 +2,98 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { TracertHop } from '../types';
 import {
-  MapPin,
   Play,
   Pause,
   ChevronLeft,
   ChevronRight,
   Maximize2,
   Navigation,
-  Globe,
-  Layers,
   Radio,
-  Zap,
 } from 'lucide-react';
+
+/** Creates an element with text content applied safely. */
+function el(tag: string, cssText: string, text?: string | number): HTMLElement {
+  const node = document.createElement(tag);
+  node.style.cssText = cssText;
+  if (text !== undefined) node.textContent = String(text);
+  return node;
+}
+
+/**
+ * Marker badge for a hop. Returns a DOM node, which Leaflet accepts in place of
+ * an HTML string for `divIcon({ html })`.
+ */
+function buildHopBadge(hopNumber: number, colour: string, isActive: boolean): HTMLElement {
+  const size = isActive ? '34px' : '26px';
+  const badge = el(
+    'div',
+    `position:relative;width:${size};height:${size};background:${colour};` +
+      'border:2px solid rgba(255,255,255,0.9);border-radius:50%;display:flex;' +
+      'align-items:center;justify-content:center;color:#000;font-weight:800;' +
+      `font-size:${isActive ? '12px' : '10px'};font-family:monospace;` +
+      `box-shadow:0 0 ${isActive ? '20px' : '10px'} ${colour};cursor:pointer;` +
+      'transition:all 0.3s ease;',
+    hopNumber,
+  );
+
+  if (isActive) {
+    badge.appendChild(
+      el(
+        'div',
+        `position:absolute;inset:-8px;border:2px solid ${colour};border-radius:50%;` +
+          'animation:pulseRing 1.5s infinite;',
+      ),
+    );
+  }
+  return badge;
+}
+
+/**
+ * Popup body for a hop.
+ *
+ * Every field goes through `textContent`. `hop.hostname` is the raw string the
+ * user typed into the target box, and `hop.city` / `hop.country` / `hop.isp`
+ * are third-party GeoIP responses — none of it can be trusted as markup.
+ */
+function buildHopPopup(hop: TracertHop, colour: string): HTMLElement {
+  const wrap = el(
+    'div',
+    'font-family:monospace;color:#f8fafc;background:#0f172a;padding:10px;' +
+      'border-radius:8px;border:1px solid #334155;min-width:180px;',
+  );
+
+  wrap.appendChild(
+    el(
+      'div',
+      `color:${colour};font-weight:bold;font-size:13px;margin-bottom:4px;`,
+      `Hop #${hop.hop} • ${String(hop.nodeType).toUpperCase()}`,
+    ),
+  );
+  wrap.appendChild(
+    el(
+      'div',
+      'font-weight:bold;font-size:12px;color:#fff;margin-bottom:2px;',
+      hop.hostname || hop.ip,
+    ),
+  );
+  wrap.appendChild(el('div', 'color:#94a3b8;font-size:11px;', `IP: ${hop.ip}`));
+  wrap.appendChild(
+    el(
+      'div',
+      'color:#38bdf8;font-size:11px;',
+      `RTT: ${hop.avgRtt > 0 ? `${hop.avgRtt} ms` : 'Timeout'}`,
+    ),
+  );
+  wrap.appendChild(
+    el(
+      'div',
+      'color:#cbd5e1;font-size:11px;margin-top:4px;',
+      `📍 ${hop.city}, ${hop.country}`,
+    ),
+  );
+  wrap.appendChild(el('div', 'color:#64748b;font-size:10px;', hop.isp));
+  return wrap;
+}
 
 interface TracertMapProps {
   hops: TracertHop[];
@@ -104,65 +184,26 @@ export const TracertMap: React.FC<TracertMapProps> = ({
 
       if (isActive) badgeBg = '#eab308'; // Gold
 
-      // Create Custom HTML Div Icon
+      // Marker badge, built as a DOM node rather than an HTML string so the hop
+      // label can never be interpreted as markup.
       const customIcon = L.divIcon({
         className: 'custom-tracert-marker',
-        html: `
-          <div style="
-            position: relative;
-            width: ${isActive ? '34px' : '26px'};
-            height: ${isActive ? '34px' : '26px'};
-            background: ${badgeBg};
-            border: 2px solid rgba(255, 255, 255, 0.9);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #000;
-            font-weight: 800;
-            font-size: ${isActive ? '12px' : '10px'};
-            font-family: monospace;
-            box-shadow: 0 0 ${isActive ? '20px' : '10px'} ${badgeBg};
-            cursor: pointer;
-            transition: all 0.3s ease;
-          ">
-            ${hop.hop}
-            ${
-              isActive
-                ? `<div style="
-                    position: absolute;
-                    inset: -8px;
-                    border: 2px solid ${badgeBg};
-                    border-radius: 50%;
-                    animation: pulseRing 1.5s infinite;
-                  "></div>`
-                : ''
-            }
-          </div>
-        `,
+        html: buildHopBadge(hop.hop, badgeBg, isActive),
         iconSize: [isActive ? 34 : 26, isActive ? 34 : 26],
         iconAnchor: [isActive ? 17 : 13, isActive ? 17 : 13],
       });
 
       const marker = L.marker(coords, { icon: customIcon }).addTo(map);
 
-      // Popup details
-      marker.bindPopup(`
-        <div style="font-family: monospace; color: #f8fafc; background: #0f172a; padding: 10px; border-radius: 8px; border: 1px solid #334155; min-width: 180px;">
-          <div style="color: ${badgeBg}; font-weight: bold; font-size: 13px; margin-bottom: 4px;">
-            Hop #${hop.hop} • ${hop.nodeType.toUpperCase()}
-          </div>
-          <div style="font-weight: bold; font-size: 12px; color: #fff; margin-bottom: 2px;">
-            ${hop.hostname || hop.ip}
-          </div>
-          <div style="color: #94a3b8; font-size: 11px;">IP: ${hop.ip}</div>
-          <div style="color: #38bdf8; font-size: 11px;">RTT: ${hop.avgRtt > 0 ? `${hop.avgRtt} ms` : 'Timeout'}</div>
-          <div style="color: #cbd5e1; font-size: 11px; margin-top: 4px;">📍 ${hop.city}, ${hop.country}</div>
-          <div style="color: #64748b; font-size: 10px;">${hop.isp}</div>
-        </div>
-      `, {
-        className: 'tracert-dark-popup',
-      });
+      // Popup details.
+      //
+      // Built as DOM nodes with `textContent`, never as an interpolated HTML
+      // string. `L.divIcon({html})` and `bindPopup(html)` are innerHTML sinks,
+      // and every field below is attacker-influenced: `hostname` is the raw
+      // target the user typed, while `city`, `country` and `isp` come verbatim
+      // from third-party GeoIP JSON. Interpolating them meant a target named
+      // `x"><img src=x onerror=...>` executed script in this origin.
+      marker.bindPopup(buildHopPopup(hop, badgeBg), { className: 'tracert-dark-popup' });
 
       marker.on('click', () => {
         onSelectHop(hop.hop);

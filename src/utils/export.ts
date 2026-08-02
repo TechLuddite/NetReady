@@ -1,11 +1,19 @@
 import JSZip from 'jszip';
-import { HistoryItem } from '../types';
+import type {
+  HistoryItem,
+  SpeedTestResult,
+  PingResult,
+  PortScanResult,
+  DnsQueryResult,
+  GeoIpResult,
+} from '../types';
 
 export const TEST_TYPES = [
   { id: 'tracert', label: 'Traceroute (TRACERT)', filename: 'tracert_results.csv', icon: 'GitCommit' },
   { id: 'speedtest', label: 'Speed Test Results', filename: 'speedtest_results.csv', icon: 'Gauge' },
   { id: 'ping', label: 'Ping & Latency Tests', filename: 'ping_results.csv', icon: 'Radio' },
   { id: 'portscanner', label: 'Port Scanner Results', filename: 'portscanner_results.csv', icon: 'Radar' },
+  { id: 'geoip', label: 'GeoIP Lookups', filename: 'geoip_results.csv', icon: 'Compass' },
   { id: 'dns', label: 'DNS Queries', filename: 'dns_results.csv', icon: 'Globe' },
   { id: 'webrtc', label: 'WebRTC & ICE Analysis', filename: 'webrtc_results.csv', icon: 'ShieldCheck' },
   { id: 'httpprobe', label: 'HTTP Probes', filename: 'httpprobe_results.csv', icon: 'Zap' },
@@ -16,12 +24,52 @@ export const TEST_TYPES = [
 
 export type TestTypeId = typeof TEST_TYPES[number]['id'];
 
-// Helper to escape CSV strings
-const escapeCsv = (val: any): string => {
+/**
+ * Escapes a value for CSV.
+ *
+ * Two jobs. The obvious one is quoting. The other is neutralising formula
+ * injection: Excel, Sheets and LibreOffice execute any cell beginning with
+ * `=`, `+`, `-`, `@`, tab or carriage return. NetReady's CSV fields include
+ * hostnames the user typed and ISP/city strings returned by third-party APIs,
+ * so a target named `=cmd|'/c calc'!A1` would otherwise become a live formula
+ * in whoever opens the report. Prefixing with an apostrophe forces text.
+ *
+ * Note that an absent value produces an empty cell, never `0` — a blank in a
+ * NetReady export means "not measured".
+ */
+export const escapeCsv = (val: unknown): string => {
   if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
+  let str = String(val);
+  if (/^[=+\-@\t\r]/.test(str)) str = `'${str}`;
+  return `"${str.replace(/"/g, '""')}"`;
 };
+
+/**
+ * Triggers a browser download for generated content.
+ *
+ * Uses a Blob rather than a `data:` URI — the JSON exporter used to build a
+ * `data:` URL from the entire history, which silently fails once the history
+ * exceeds the browser's URL length limit. The object URL is revoked on the next
+ * frame rather than synchronously, because Safari and Firefox abort the
+ * download if the URL disappears in the same tick as the click.
+ */
+export function triggerDownload(
+  content: BlobPart,
+  filename: string,
+  mime = 'text/csv;charset=utf-8;',
+): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** `YYYY-MM-DD` stamp used in every export filename. */
+export const exportDateStamp = (): string => new Date().toISOString().slice(0, 10);
 
 // Generate Master Summary CSV
 export function generateMasterSummaryCsv(items: HistoryItem[]): string {
@@ -115,7 +163,16 @@ export function generateTracertCsv(items: HistoryItem[]): string {
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
 }
 
-// Generate SpeedTest CSV
+/**
+ * Speed test CSV.
+ *
+ * The field names here were wrong in every column: this read `downloadMbps`,
+ * `uploadMbps`, `pingMs`, `jitterMs` against a record that stores
+ * `downloadSpeed`, `uploadSpeed`, `ping`, `jitter` — and `ip`/`isp`/`location`,
+ * which `SpeedTestResult` has never had. Every value fell through to `''`, so
+ * the export produced a structurally valid CSV with no data in it. The `data:
+ * any` on `HistoryItem` is what let that compile.
+ */
 export function generateSpeedtestCsv(items: HistoryItem[]): string {
   const speedItems = items.filter((i) => i.type === 'speedtest');
   const headers = [
@@ -124,28 +181,32 @@ export function generateSpeedtestCsv(items: HistoryItem[]): string {
     'Date',
     'Download Speed (Mbps)',
     'Upload Speed (Mbps)',
-    'Ping Latency (ms)',
+    'Idle Latency (ms)',
     'Jitter (ms)',
-    'Client IP',
-    'ISP Provider',
-    'Location',
+    'Loaded Latency (ms)',
+    'Bufferbloat Grade',
+    'Downloaded (MB)',
+    'Uploaded (MB)',
     'Test Server',
+    'Not Measured',
   ];
 
   const rows = speedItems.map((item) => {
-    const d = item.data || {};
+    const d = (item.data ?? {}) as Partial<SpeedTestResult>;
     return [
       escapeCsv(item.id),
       escapeCsv(item.timestamp),
       escapeCsv(new Date(item.timestamp).toLocaleString()),
-      escapeCsv(d.downloadMbps ?? ''),
-      escapeCsv(d.uploadMbps ?? ''),
-      escapeCsv(d.pingMs ?? ''),
-      escapeCsv(d.jitterMs ?? ''),
-      escapeCsv(d.ip ?? ''),
-      escapeCsv(d.isp ?? ''),
-      escapeCsv(d.location ?? ''),
+      escapeCsv(d.downloadSpeed ?? ''),
+      escapeCsv(d.uploadSpeed ?? ''),
+      escapeCsv(d.ping ?? ''),
+      escapeCsv(d.jitter ?? ''),
+      escapeCsv(d.loadedPing ?? ''),
+      escapeCsv(d.bufferbloatScore ?? ''),
+      escapeCsv(d.totalBytesDownloaded ?? ''),
+      escapeCsv(d.totalBytesUploaded ?? ''),
       escapeCsv(d.serverName ?? ''),
+      escapeCsv((d.failures ?? []).map((f) => `${f.metric}: ${f.detail}`).join(' | ')),
     ];
   });
 
@@ -169,20 +230,23 @@ export function generatePingCsv(items: HistoryItem[]): string {
     'Jitter (ms)',
   ];
 
+  // These read `sent`/`received`/`lossPercent`/`minRttMs`/`maxRttMs`/`avgRttMs`/
+  // `jitterMs`; `PingResult` stores `packetsSent`/`packetsReceived`/`packetLoss`/
+  // `minPing`/`maxPing`/`avgPing`/`jitter`. Every column exported blank.
   const rows = pingItems.map((item) => {
-    const d = item.data || {};
+    const d = (item.data ?? {}) as Partial<PingResult>;
     return [
       escapeCsv(item.id),
       escapeCsv(item.timestamp),
       escapeCsv(new Date(item.timestamp).toLocaleString()),
       escapeCsv(d.target || item.title),
-      escapeCsv(d.sent ?? ''),
-      escapeCsv(d.received ?? ''),
-      escapeCsv(d.lossPercent ?? ''),
-      escapeCsv(d.minRttMs ?? ''),
-      escapeCsv(d.maxRttMs ?? ''),
-      escapeCsv(d.avgRttMs ?? ''),
-      escapeCsv(d.jitterMs ?? ''),
+      escapeCsv(d.packetsSent ?? ''),
+      escapeCsv(d.packetsReceived ?? ''),
+      escapeCsv(d.packetLoss ?? ''),
+      escapeCsv(d.minPing ?? ''),
+      escapeCsv(d.maxPing ?? ''),
+      escapeCsv(d.avgPing ?? ''),
+      escapeCsv(d.jitter ?? ''),
     ];
   });
 
@@ -196,7 +260,8 @@ export function generatePortScannerCsv(items: HistoryItem[]): string {
     'Test ID',
     'Timestamp',
     'Date',
-    'Target IP / Host',
+    'Scan Target',
+    'Host',
     'Port Number',
     'Service Name',
     'Port Status',
@@ -206,16 +271,18 @@ export function generatePortScannerCsv(items: HistoryItem[]): string {
   const rows: string[][] = [];
 
   scannerItems.forEach((item) => {
-    const d = item.data || {};
+    // `d.target` does not exist on PortScanResult; the field is `targetHost`.
+    const d = (item.data ?? {}) as Partial<PortScanResult>;
     const dateStr = new Date(item.timestamp).toLocaleString();
 
     if (Array.isArray(d.ports) && d.ports.length > 0) {
-      d.ports.forEach((p: any) => {
+      d.ports.forEach((p) => {
         rows.push([
           escapeCsv(item.id),
           escapeCsv(item.timestamp),
           escapeCsv(dateStr),
-          escapeCsv(d.target || item.title),
+          escapeCsv(d.targetHost || item.title),
+          escapeCsv(p.host),
           escapeCsv(p.port),
           escapeCsv(p.service || ''),
           escapeCsv(p.status || ''),
@@ -227,11 +294,12 @@ export function generatePortScannerCsv(items: HistoryItem[]): string {
         escapeCsv(item.id),
         escapeCsv(item.timestamp),
         escapeCsv(dateStr),
-        escapeCsv(d.target || item.title),
-        escapeCsv('-'),
-        escapeCsv('-'),
-        escapeCsv('-'),
-        escapeCsv('-'),
+        escapeCsv(d.targetHost || item.title),
+        escapeCsv(''),
+        escapeCsv(''),
+        escapeCsv(''),
+        escapeCsv(''),
+        escapeCsv(''),
       ]);
     }
   });
@@ -257,11 +325,13 @@ export function generateDnsCsv(items: HistoryItem[]): string {
   const rows: string[][] = [];
 
   dnsItems.forEach((item) => {
-    const d = item.data || {};
+    // `queryTimeMs` and `r.ttl` do not exist; the fields are `responseTimeMs`
+    // and `TTL` (capitalised, as DoH JSON returns it).
+    const d = (item.data ?? {}) as Partial<DnsQueryResult>;
     const dateStr = new Date(item.timestamp).toLocaleString();
 
     if (Array.isArray(d.records) && d.records.length > 0) {
-      d.records.forEach((r: any) => {
+      d.records.forEach((r) => {
         rows.push([
           escapeCsv(item.id),
           escapeCsv(item.timestamp),
@@ -269,9 +339,9 @@ export function generateDnsCsv(items: HistoryItem[]): string {
           escapeCsv(d.domain || item.title),
           escapeCsv(d.recordType || 'A'),
           escapeCsv(d.provider || 'Cloudflare'),
-          escapeCsv(d.queryTimeMs ?? ''),
-          escapeCsv(r.data || r),
-          escapeCsv(r.ttl ?? ''),
+          escapeCsv(d.responseTimeMs ?? ''),
+          escapeCsv(r.data ?? ''),
+          escapeCsv(r.TTL ?? ''),
         ]);
       });
     } else {
@@ -282,11 +352,66 @@ export function generateDnsCsv(items: HistoryItem[]): string {
         escapeCsv(d.domain || item.title),
         escapeCsv(d.recordType || 'A'),
         escapeCsv(d.provider || 'Cloudflare'),
-        escapeCsv(d.queryTimeMs ?? ''),
+        escapeCsv(d.responseTimeMs ?? ''),
         escapeCsv('No records'),
-        escapeCsv('-'),
+        escapeCsv(''),
       ]);
     }
+  });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
+/**
+ * GeoIP CSV.
+ *
+ * GeoIP records have always been saved to history, but `geoip` was missing from
+ * `TEST_TYPES`, so they could never be exported, never appeared in the ZIP, and
+ * were absent from the manifest.
+ */
+export function generateGeoIpCsv(items: HistoryItem[]): string {
+  const geoItems = items.filter((i) => i.type === 'geoip');
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Query',
+    'Resolved IP',
+    'City',
+    'Region',
+    'Country',
+    'Country Code',
+    'Latitude',
+    'Longitude',
+    'Timezone',
+    'ISP',
+    'Organisation',
+    'ASN',
+    'Proxy Detected',
+    'VPN Detected',
+  ];
+
+  const rows = geoItems.map((item) => {
+    const d = (item.data ?? {}) as Partial<GeoIpResult>;
+    return [
+      escapeCsv(item.id),
+      escapeCsv(item.timestamp),
+      escapeCsv(new Date(item.timestamp).toLocaleString()),
+      escapeCsv(d.query ?? ''),
+      escapeCsv(d.ip ?? ''),
+      escapeCsv(d.city ?? ''),
+      escapeCsv(d.region ?? ''),
+      escapeCsv(d.country ?? ''),
+      escapeCsv(d.countryCode ?? ''),
+      escapeCsv(d.lat ?? ''),
+      escapeCsv(d.lng ?? ''),
+      escapeCsv(d.timezone ?? ''),
+      escapeCsv(d.isp ?? ''),
+      escapeCsv(d.org ?? ''),
+      escapeCsv(d.asn ?? ''),
+      escapeCsv(d.isProxy ?? ''),
+      escapeCsv(d.isVpn ?? ''),
+    ];
   });
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
@@ -323,28 +448,16 @@ export function getCsvForType(items: HistoryItem[], type: string): string {
       return generatePortScannerCsv(items);
     case 'dns':
       return generateDnsCsv(items);
+    case 'geoip':
+      return generateGeoIpCsv(items);
     default:
       return generateGenericCsv(items, type);
   }
 }
 
-// Trigger browser download for single file
-export function triggerDownload(content: string | Blob, filename: string, mimeType: string = 'text/csv;charset=utf-8;') {
-  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 // Export single test type CSV
 export function exportSingleCsv(items: HistoryItem[], type: string, filename: string) {
-  const csvContent = getCsvForType(items, type);
-  triggerDownload(csvContent, filename);
+  triggerDownload(getCsvForType(items, type), filename, 'text/csv;charset=utf-8;');
 }
 
 // Generate and trigger download for BUNDLED ZIP

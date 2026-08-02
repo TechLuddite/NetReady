@@ -5,15 +5,11 @@ import {
   Pause,
   Play,
   Trash2,
-  RefreshCw,
-  ArrowUpRight,
   Wifi,
   Clock,
   HardDrive,
   Filter,
   Layers,
-  CheckCircle2,
-  Info,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -123,6 +119,12 @@ export const TrafficMonitor: React.FC = () => {
     const MAX_SAMPLES = 30; // 30-second sliding sparkline window
 
     const interval = setInterval(() => {
+      // Pause means pause. This guard was missing, so "Pause" only stopped the
+      // PerformanceObserver from collecting — the aggregation tick kept pushing
+      // empty samples and re-rendering the whole Dashboard subtree every second,
+      // indefinitely.
+      if (!isMonitoringRef.current) return;
+
       const now = new Date();
       const timeLabel = now.toLocaleTimeString([], {
         hour12: false,
@@ -133,7 +135,7 @@ export const TrafficMonitor: React.FC = () => {
       const currentBatch = [...pendingEntriesRef.current];
       pendingEntriesRef.current = [];
 
-      let requestsCount = currentBatch.length;
+      const requestsCount = currentBatch.length;
       let transferBytes = 0;
       let totalLatency = 0;
       let peakLatencyMs = 0;

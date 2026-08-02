@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Radio, Play, StopCircle, RefreshCw, AlertCircle, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Radio, Play, StopCircle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { PingResult, PingPoint, HistoryItem } from '../types';
-import { PING_TARGET_PRESETS, executePingBatch } from '../utils/network';
+import { PING_TARGET_PRESETS, executePingBatch, meanConsecutiveDelta } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
+import { MetricValue, displayMetric } from './MetricValue';
 
 interface PingTesterProps {
   onHistoryUpdate: () => void;
@@ -54,31 +55,27 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
         url,
         label,
         packetCount,
-        (pt, currentPoints) => {
+        (_pt, currentPoints) => {
           setPoints(currentPoints);
 
-          // Compute live metrics so cards update in real-time
+          // Live metrics so the cards update mid-run. Same null semantics as the
+          // engine: an unanswered target has no RTT, so these stay null rather
+          // than reading 0 ms.
           const valid = currentPoints.filter((p) => p.status === 'success' && p.time > 0);
           const sent = currentPoints.length;
           const received = valid.length;
           const packetLoss = sent > 0 ? Math.round(((sent - received) / sent) * 100) : 0;
-          let minPing = 0;
-          let maxPing = 0;
-          let avgPing = 0;
-          let jitter = 0;
+          let minPing: number | null = null;
+          let maxPing: number | null = null;
+          let avgPing: number | null = null;
+          let jitter: number | null = null;
 
           if (valid.length > 0) {
             const times = valid.map((p) => p.time);
             minPing = Math.min(...times);
             maxPing = Math.max(...times);
             avgPing = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
-            if (times.length > 1) {
-              let diffSum = 0;
-              for (let k = 0; k < times.length - 1; k++) {
-                diffSum += Math.abs(times[k + 1] - times[k]);
-              }
-              jitter = Math.round(diffSum / (times.length - 1));
-            }
+            jitter = meanConsecutiveDelta(times);
           }
 
           setResult({
@@ -107,8 +104,15 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
           id: res.id,
           type: 'ping',
           timestamp: res.timestamp,
-          title: `Ping ${res.label}: Avg ${res.avgPing} ms${packetCount === 0 ? ' (Continuous)' : ''}`,
-          summary: `Min: ${res.minPing}ms | Max: ${res.maxPing}ms | Jitter: ${res.jitter}ms | Loss: ${res.packetLoss}% (${res.packetsSent} sent)`,
+          title: `Ping ${res.label}: avg ${displayMetric(res.avgPing, 'ms')}${
+            packetCount === 0 ? ' (continuous)' : ''
+          }`,
+          summary: `Min: ${displayMetric(res.minPing, 'ms')} | Max: ${displayMetric(
+            res.maxPing,
+            'ms',
+          )} | Jitter: ${displayMetric(res.jitter, 'ms')} | Loss: ${res.packetLoss}% (${
+            res.packetsSent
+          } sent)`,
           data: res,
         };
 
@@ -146,7 +150,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             </h1>
           </div>
           <p className="text-xs text-slate-400 max-w-xl">
-            Measures round-trip response time, latency jitter variance, and packet loss using microsecond-precision HTTP HEAD probes.
+            Measures round-trip time, jitter and packet loss using HTTP HEAD probes. This is application-layer timing, not ICMP — it includes TLS and server handling, so it reads slightly higher than a system ping.
           </p>
         </div>
 
@@ -247,28 +251,28 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
           <div className="text-xs text-slate-400 uppercase font-medium mb-1">Min Ping</div>
           <div className="text-2xl font-bold font-mono text-emerald-400">
-            {result ? `${result.minPing} ms` : '--'}
+            <MetricValue value={result?.minPing ?? null} unit="ms" unavailableClassName="text-slate-700" />
           </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
           <div className="text-xs text-slate-400 uppercase font-medium mb-1">Avg Ping</div>
           <div className="text-2xl font-bold font-mono text-blue-400">
-            {result ? `${result.avgPing} ms` : '--'}
+            <MetricValue value={result?.avgPing ?? null} unit="ms" unavailableClassName="text-slate-700" />
           </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
           <div className="text-xs text-slate-400 uppercase font-medium mb-1">Max Ping</div>
           <div className="text-2xl font-bold font-mono text-rose-400">
-            {result ? `${result.maxPing} ms` : '--'}
+            <MetricValue value={result?.maxPing ?? null} unit="ms" unavailableClassName="text-slate-700" />
           </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 text-center">
           <div className="text-xs text-slate-400 uppercase font-medium mb-1">Jitter Variance</div>
           <div className="text-2xl font-bold font-mono text-purple-400">
-            {result ? `${result.jitter} ms` : '--'}
+            <MetricValue value={result?.jitter ?? null} unit="ms" unavailableClassName="text-slate-700" />
           </div>
         </div>
 

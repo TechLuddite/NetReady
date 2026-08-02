@@ -1,6 +1,6 @@
 {
   "name": "NetReady",
-  "description": "Browser-native network diagnostics, expansive traceroute TRACERT route visualizer with interactive hop map, individual CSV & bundled ZIP export suite, local port scanner, speed and latency tests, DoH DNS resolver, WebRTC ICE analyzer, IP CIDR calculator, and persistent network report history.",
+  "description": "Browser-native network diagnostics: real DNS/TCP/TLS/TTFB timing breakdowns, CDN edge-path exploration on an interactive map, local port scanning, speed and latency tests, DoH DNS resolution, WebRTC ICE analysis, CIDR calculation, and persistent local report history. Every metric states how it was measured.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

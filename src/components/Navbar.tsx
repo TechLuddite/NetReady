@@ -184,7 +184,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
 
               {/* Downlink Speed Badge */}
-              {connInfo.downlink && (
+              {connInfo.downlink !== undefined && connInfo.downlink > 0 && (
                 <div className="hidden xl:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono bg-white/5 border border-white/10 text-slate-300">
                   <span className="text-slate-400">Est. Downlink:</span>
                   <span className="font-semibold text-cyan-400">{connInfo.downlink} Mbps</span>
@@ -259,7 +259,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Scroll right to see more diagnostic tools"
                   aria-label="Scroll right for more tools"
                 >
-                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-cyan-200 hidden xs:inline">
+                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-cyan-200 hidden sm:inline">
                     More Tools
                   </span>
                   <ChevronRight className="w-4 h-4 text-cyan-300 stroke-[3] animate-bounce-right" />

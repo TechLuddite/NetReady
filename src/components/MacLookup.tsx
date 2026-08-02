@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Copy, CheckCircle2, Bookmark, ShieldCheck, HardDrive } from 'lucide-react';
+import { Search, Copy, CheckCircle2, Bookmark } from 'lucide-react';
 import { parseAndLookupMac } from '../utils/oui';
 import { HistoryItem } from '../types';
 import { saveHistoryItem } from '../utils/storage';

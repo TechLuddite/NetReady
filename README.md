@@ -1,129 +1,154 @@
 # NetReady 🌐⚡
 
-> **Browser-Native Network Diagnostics Workstation & Local Port Scanner**
+> **Browser-native network diagnostics — where every number tells you how it was measured.**
 
-NetReady is a modern, high-performance, client-side network diagnostics suite and local port scanner engineered to run 100% inside your browser using standard Web APIs, WebSockets, DNS-over-HTTPS (DoH), and WebRTC ICE probing.
+NetReady is a client-side network diagnostics suite that runs entirely in your browser using
+standard Web APIs: `fetch`, WebSockets, `RTCPeerConnection`, the Performance Timeline, and
+DNS-over-HTTPS. There is no backend, no account, and no build step between you and the results.
+
+Its distinguishing rule: **NetReady never invents a number.** When a measurement fails, it reports
+`—` and tells you why. Most speed tests will happily hand you a plausible figure derived from
+nothing; this one won't.
 
 ---
 
-## 🛠️ Key Diagnostic Tools
+## 🛠️ Tools
 
-### 1. 📡 Local Port Scanner
-- **Target Specification**: Input hostnames, IPv4 addresses, loopback interfaces (`127.0.0.1`), or subnets (`192.168.1.0/24`).
-- **Auto-Detect Subnet**: Discovers active local network interfaces using WebRTC candidate gathering.
-- **Port Ranges**:
-  - **Category Presets**: Web & Dev (`80, 443, 3000, 5000, 8080`), Top 15 Common Ports, Databases (`1433, 3306, 5432, 6379, 27017`), Remote Admin & Mail (`21, 22, 23, 25, 3389, 5900`).
-  - **Custom Ports & Ranges**: Flexible input supporting comma-separated ports and ranges (e.g. `80, 443, 3000-3010, 8080`).
-- **Socket Probe Engine**: Reports `Open`, `Closed`, or `Filtered` port states with roundtrip latency, target IP/host, service name, and descriptions.
+### 1. ⚡ Speed & Bandwidth
+Streams real data over three concurrent connections against the Cloudflare edge, measuring
+throughput from bytes that actually moved. Reports download, upload, idle latency, jitter, latency
+under load, and a bufferbloat grade. A ramp-up window is excluded so the figure reflects steady
+state rather than TCP slow start.
 
-### 2. ⚡ WebRTC Bandwidth & Speed Test
-- Probes download/upload capacity, ping latency, and jitter directly from standard web edge endpoints without external plugins.
+### 2. 🎯 Ping & Jitter
+Round-trip time, jitter and packet loss across six public endpoints or a custom host, with a
+continuous mode. Note this is *application-layer* timing over HTTPS, not ICMP — it includes TLS and
+server handling, so it reads slightly higher than a system `ping`.
 
-### 3. 🎯 Multi-Host Ping & Jitter Monitor
-- Measures real-time packet round-trip time (RTT), minimum/maximum latency variance, and connection jitter.
+### 3. 📡 Local Port Scanner *(beta)*
+Probes hosts, subnets (`192.168.1.0/24`) and ranges (`10.0.0.1-20`) for reachable services using
+`fetch`, image and WebSocket probes. Port state is **inferred from connection timing**, not from a
+TCP handshake the browser will not expose — treat results as indicative, not authoritative. Around
+70 ports (21, 22, 23, 25, 110, 143, 465, 587, 993, 995 among them) are blocked outright by browser
+security policy and are reported as such rather than silently skipped.
 
-### 4. 🔒 DoH DNS Resolver
-- Queries domain records (`A`, `AAAA`, `MX`, `TXT`, `NS`, `CNAME`) using DNS-over-HTTPS providers (Cloudflare, Google Public DNS).
+### 4. 🔒 DNS-over-HTTPS Resolver
+`A`, `AAAA`, `MX`, `TXT`, `NS`, `CNAME`, `CAA`, `SRV` and `SOA` records via Cloudflare or Google,
+with response codes, TTLs and the raw JSON payload.
 
-### 5. 🌐 WebRTC ICE Candidate Analyzer
-- Discovers public WAN IP addresses, internal LAN interface candidates, and NAT traversal topology using STUN servers.
+### 5. 🌐 WebRTC ICE Analyzer
+Discovers public and local ICE candidates via STUN and infers NAT topology. Modern browsers return
+mDNS `.local` candidates instead of real LAN addresses, so local-interface discovery frequently
+finds nothing — NetReady says so rather than guessing.
 
 ### 6. 🧮 Subnet & CIDR Calculator
-- Computes network boundaries, broadcast addresses, usable host counts, netmasks, and IP binary representations for any CIDR notation.
+Network and broadcast addresses, usable host ranges, netmasks, wildcard masks, binary
+representations, and subnet partitioning. Handles `/31` per RFC 3021 and `/32`. Fully offline.
 
-### 7. 🔍 MAC OUI Hardware Vendor Lookup
-- Decodes IEEE Organisationally Unique Identifiers (OUIs) to identify network device manufacturers.
+### 7. 🔍 MAC / OUI Vendor Lookup
+Decodes IEEE OUIs against a bundled offline database, plus unicast/multicast and
+globally-unique/locally-administered bits. Fully offline. A partial MAC is reported as a prefix, not
+padded out into a complete address.
 
-### 8. 🛡️ HTTP Security Header Probe
-- Inspects HTTP status codes, server headers, and security enforcement headers (`HSTS`, `CORS`, `CSP`, `X-Frame-Options`).
+### 8. 🛡️ HTTP Probe
+Status code, response time, CORS reachability, and the response headers the browser is permitted to
+read. Note that cross-origin `fetch` can only see CORS-safelisted headers unless the server sets
+`Access-Control-Expose-Headers`, so security headers like `HSTS`, `CSP` and `X-Frame-Options` are
+usually **not** visible from a browser regardless of whether the server sends them.
 
-### 9. 🔌 WebSocket Echo & Latency Tester
-- Measures WebSocket handshake setup times, message frame roundtrip latency, and echo packet reliability over `ws://` and `wss://`.
+### 9. 🔌 WebSocket Tester
+Handshake timing and application-layer echo round-trips over `ws://` and `wss://`.
 
-### 10. 💾 Persistent LocalStorage History
-- All scan results automatically persist in the browser's `localStorage`.
-- Search, filter, inspect raw JSON payloads, and export reports in **JSON** or **CSV** formats.
+### 10. 🧭 GeoIP & ISP Inspector
+Geolocation, ISP, ASN and proxy/VPN signals for an IP or domain, via third-party lookup providers.
+
+### 11. 📊 Live Traffic Monitor
+Real-time throughput and latency from the browser's own Performance Timeline.
+
+### 12. 🗺️ Route Model *(simulated — read this)*
+Resolves a target, looks up its real location, and draws a plausible great-circle path to it.
+
+**The intermediate hops are generated, not measured.** Browsers cannot send ICMP packets or set an
+IP TTL, so no web page can perform a real traceroute. The first and last hops are grounded in a real
+DNS resolution and a real geolocation lookup; everything between them is illustrative. Exports mark
+these records as simulated. A replacement built on things the browser genuinely can observe — real
+DNS/TCP/TLS/TTFB phase timings, the CDN edge you're actually routed to, and HTTP/3 negotiation — is
+the next major piece of work.
+
+### 13. 💾 History & Export
+Results persist in `localStorage`. Search, filter, inspect raw JSON, and export per-tool CSVs, a
+master summary, or a bundled ZIP with a manifest.
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Getting started
 
-### Prerequisites
-- **Node.js**: v18.0.0 or higher
-- **npm** or **yarn**
-
-### Installation
+Requires Node.js 20+.
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/netready.git
-
-# Navigate into the workspace
-cd netready
-
-# Install dependencies
 npm install
-
-# Start the development server
-npm run dev
+npm run dev      # http://localhost:5173
 ```
-
-The application will launch on `http://localhost:3000`.
-
-### Building for Production
 
 ```bash
-npm run build
-npm run start
+npm run build    # static bundle in dist/
+npm run preview
+npm run check    # typecheck + lint + tests
 ```
 
----
-
-## 🔒 Privacy & Safety Statement
-
-NetReady is engineered with a strict **Privacy-First & Security-First** architecture:
-- **100% Client-Side Execution**: All network diagnostics, socket probing, DNS-over-HTTPS lookups, and WebRTC candidate analysis execute strictly within your browser.
-- **Zero Server Telemetry**: We do not collect, transmit, store, or analyze any user IP addresses, scan targets, or diagnostic logs.
-- **Local Persistence Only**: All scan history, speed test metrics, and configuration options are saved locally in your browser's `localStorage`. Clearing your browser data completely removes all saved records.
-- **Ethical Scanning Notice**: Port scanning and network diagnostic probes should only be executed on networks, devices, and hosts that you own or have explicit authorization to audit.
+There is no server component. `npm run build` emits static files that can be hosted anywhere.
 
 ---
 
-## ☕ Developer Support & Donations
+## 🔒 Privacy
 
-If NetReady has saved you time in network troubleshooting or dev environment setup, consider supporting ongoing open-source development!
+NetReady has **no backend**. Nothing is sent to, stored on, or logged by any server the project
+operates, because there isn't one. Results live in your browser's `localStorage` and clearing site
+data erases them completely.
 
-- ☕ **Buy Me a Coffee**: [buymeacoffee.com/opsvibe](https://buymeacoffee.com/opsvibe)
-- 💖 **GitHub Sponsors**: [github.com/sponsors/opsvibe](https://github.com/sponsors/opsvibe)
-- 🥤 **Ko-fi**: [ko-fi.com/opsvibe](https://ko-fi.com/opsvibe)
-- ⚡ **Crypto / Web3**: `opsvibe.eth` / `0xOpsVibe...`
+That is not the same as "nothing leaves your browser". A network diagnostic cannot measure a network
+without touching it, so the following go directly from your browser to third parties:
 
-Your contributions help maintain dependencies, build new diagnostic tools, and keep NetReady 100% free and open-source under AGPL-3.0.
+| Provider | Receives |
+|---|---|
+| `speed.cloudflare.com` | Your IP, plus tens of MB of transfer, during a speed test |
+| `cloudflare-dns.com`, `dns.google` | Every domain you resolve, over encrypted DoH |
+| `ipwho.is`, `ipapi.co`, `freeipapi.com` | Your public IP on opening the GeoIP tool, and every IP or domain you look up |
+| `1.1.1.1`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets |
+| `stun.l.google.com` and other STUN servers | Your public IP, and potentially local addresses |
+| `basemaps.cartocdn.com`, `openstreetmap.org` | Map areas you view, revealing an approximate target location |
+| Hosts you enter | Direct connections from your browser — that is what a probe *is* |
+
+The CIDR calculator, MAC/OUI lookup, history browser and every export contact nobody at all.
+
+**Authorized use only.** Port scanning and network probing should only be run against networks,
+devices and hosts you own or have explicit permission to test.
 
 ---
 
-## 👏 Shout-Outs & Acknowledgments
+## 🔄 Quality gates
 
-Special thanks to the amazing open-source community and tools that make NetReady possible:
+- `npm run typecheck` — TypeScript in `strict` mode, zero errors.
+- `npm run lint` — ESLint with `react-hooks`, zero errors.
+- `npm run test` — Vitest. Coverage focuses on the pure logic where silent failures hide: CSV
+  generation, CIDR math, OUI decoding, and the rule that a failed measurement can never produce a
+  number.
 
-- **[Lucide Icons](https://lucide.dev/)**: For clean, modern UI icon set.
-- **[Tailwind CSS](https://tailwindcss.com/)**: For rapid utility-first styling architecture.
-- **[Vite](https://vitejs.dev/) & [React](https://react.dev/)**: For lightweight, ultra-fast frontend execution.
-- **[Cloudflare & Google Public DNS](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/)**: For high-performance, privacy-respecting DoH resolvers.
-- **[IEEE OUI Registry](https://standards.ieee.org/products-programs/regauth/oui/)**: For hardware vendor lookup standards.
+CI runs all three on every push and pull request; deployment is gated on them passing.
 
 ---
 
-## 🔄 Drift Check & System Integrity
+## 👏 Acknowledgments
 
-NetReady enforces strict client-side build integrity and zero configuration drift:
-
-- **TypeScript Verification**: `npm run lint` ensures type safety with strict `tsc --noEmit` checks.
-- **Deterministic Builds**: `npm run build` produces static bundle outputs in `dist/` with zero server runtime state drift.
-- **Browser Standard Consistency**: Fully compliant with modern W3C Web APIs (Fetch API, WebSockets, WebRTC RTCPeerConnection, Storage API).
+[Lucide](https://lucide.dev/) · [Tailwind CSS](https://tailwindcss.com/) ·
+[Vite](https://vitejs.dev/) · [React](https://react.dev/) · [Leaflet](https://leafletjs.com/) ·
+[Recharts](https://recharts.org/) · [Cloudflare](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/)
+and [Google Public DNS](https://developers.google.com/speed/public-dns) ·
+[OpenStreetMap](https://www.openstreetmap.org/copyright) & [CARTO](https://carto.com/attributions) ·
+the [IEEE OUI registry](https://standards.ieee.org/products-programs/regauth/oui/).
 
 ---
 
 ## 🛡️ License
 
-This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see the [LICENSE](LICENSE) file for details.
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).

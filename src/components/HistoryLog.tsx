@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { History, Download, Trash2, Search, FileJson, FileSpreadsheet, HardDrive, Clock, ShieldCheck, AlertCircle } from 'lucide-react';
+import { History, Trash2, Search, FileJson, FileSpreadsheet, HardDrive, Clock, ShieldCheck, AlertCircle } from 'lucide-react';
 import { HistoryItem } from '../types';
 import {
   deleteHistoryItem,

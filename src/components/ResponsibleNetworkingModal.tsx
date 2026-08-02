@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ShieldAlert, CheckSquare, Square, X, Lock, Server, Check } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Square, X, Lock, Check } from 'lucide-react';
 
 interface ResponsibleNetworkingModalProps {
   isOpen: boolean;
@@ -13,7 +13,7 @@ export const RESPONSIBLE_NETWORKING_STORAGE_KEY = 'netready_responsible_networki
 export const isResponsibleNetworkingAccepted = (): boolean => {
   try {
     return localStorage.getItem(RESPONSIBLE_NETWORKING_STORAGE_KEY) === 'true';
-  } catch (e) {
+  } catch {
     return false;
   }
 };
@@ -131,29 +131,43 @@ export const ResponsibleNetworkingModal: React.FC<ResponsibleNetworkingModalProp
             </ul>
           </div>
 
-          {/* Checkbox Section */}
+          {/* Consent.
+              This was a <label onClick> wrapping a decorative icon, with no
+              input element anywhere — so the control that gates the whole
+              authorisation flow was unreachable by keyboard and announced as
+              nothing by a screen reader. It is a real checkbox now. */}
           <div className="pt-2 border-t border-white/10">
             <label
-              onClick={() => setIsChecked(!isChecked)}
-              className="flex items-start space-x-3 p-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 rounded-xl cursor-pointer transition-all select-none group"
+              htmlFor="responsible-networking-consent"
+              className="flex items-start space-x-3 p-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 rounded-xl cursor-pointer transition-all select-none group focus-within:ring-2 focus-within:ring-cyan-500/60"
             >
-              <div className="mt-0.5 shrink-0 text-cyan-400">
-                {isChecked ? (
-                  <div className="w-5 h-5 bg-cyan-500 rounded flex items-center justify-center text-black font-bold">
-                    <Check className="w-3.5 h-3.5 stroke-[3]" />
-                  </div>
-                ) : (
-                  <Square className="w-5 h-5 text-slate-500 group-hover:text-slate-300" />
-                )}
-              </div>
-              <div className="text-xs">
+              <span className="relative mt-0.5 shrink-0">
+                <input
+                  id="responsible-networking-consent"
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={(e) => setIsChecked(e.target.checked)}
+                  className="peer absolute inset-0 w-5 h-5 opacity-0 cursor-pointer"
+                />
+                <span aria-hidden="true" className="block text-cyan-400">
+                  {isChecked ? (
+                    <span className="w-5 h-5 bg-cyan-500 rounded flex items-center justify-center text-black font-bold">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    </span>
+                  ) : (
+                    <Square className="w-5 h-5 text-slate-500 group-hover:text-slate-300" />
+                  )}
+                </span>
+              </span>
+              <span className="text-xs">
                 <span className="font-semibold text-white block mb-0.5">
                   I confirm that I own or have explicit authorization to scan and test target hosts.
                 </span>
                 <span className="text-slate-400 text-[11px] block">
-                  I assume full responsibility for all network diagnostic actions initiated from this client browser session.
+                  I assume full responsibility for all network diagnostic actions initiated from
+                  this client browser session.
                 </span>
-              </div>
+              </span>
             </label>
           </div>
         </div>

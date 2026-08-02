@@ -1,22 +1,14 @@
 import React, { useState } from 'react';
 import {
+  AlertTriangle,
   GitCommit,
   Play,
   RefreshCw,
   Copy,
   Check,
-  Globe,
-  Radio,
-  Zap,
-  ShieldCheck,
-  AlertCircle,
   Terminal,
   Activity,
-  MapPin,
   ListFilter,
-  BarChart2,
-  Share2,
-  AlertTriangle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -50,6 +42,7 @@ export const TracertVisualizer: React.FC<TracertVisualizerProps> = ({ onHistoryU
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
 
   const [copiedTerminal, setCopiedTerminal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const getActiveTarget = () => {
     if (customTarget.trim()) return customTarget.trim();
@@ -64,6 +57,7 @@ export const TracertVisualizer: React.FC<TracertVisualizerProps> = ({ onHistoryU
     setHops([]);
     setActiveHopNum(null);
     setResult(null);
+    setError(null);
 
     try {
       const res = await executeTraceroute(
@@ -83,8 +77,8 @@ export const TracertVisualizer: React.FC<TracertVisualizerProps> = ({ onHistoryU
         id: res.id,
         type: 'tracert',
         timestamp: res.timestamp,
-        title: `Traceroute: ${res.targetHost} (${res.totalHops} hops)`,
-        summary: `Target IP: ${res.targetIp} | Dist: ${res.totalDistanceKm} km | Avg RTT: ${res.avgLatencyMs} ms`,
+        title: `Route model: ${res.targetHost} (${res.totalHops} hops, simulated)`,
+        summary: `Target IP: ${res.targetIp} | Great-circle distance: ${res.totalDistanceKm} km | SIMULATED INTERMEDIATE HOPS`,
         data: res,
       };
 
@@ -92,6 +86,11 @@ export const TracertVisualizer: React.FC<TracertVisualizerProps> = ({ onHistoryU
       onHistoryUpdate();
     } catch (err) {
       console.error('Traceroute error:', err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'The trace could not complete.',
+      );
     } finally {
       setIsTracing(false);
     }
@@ -136,20 +135,52 @@ export const TracertVisualizer: React.FC<TracertVisualizerProps> = ({ onHistoryU
 
   return (
     <div className="space-y-6">
+      {/* This tool cannot do what its name implies, and says so. A browser has
+          no access to raw sockets and cannot set an IP TTL, so there is no way
+          to elicit a reply from an intermediate router. Hops 1..n-1 below are
+          generated. Phase 3 replaces this with the Edge Path Explorer, which
+          measures things the browser genuinely can observe. */}
+      <div
+        role="note"
+        className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3"
+      >
+        <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-amber-200">
+            Simulated route — the intermediate hops are not measured
+          </p>
+          <p className="text-xs text-amber-100/80 leading-relaxed">
+            Browsers cannot send ICMP packets or set an IP TTL, so no web page can perform a real
+            traceroute. The first and last hops here are grounded in a real DNS resolution and a
+            real geolocation lookup; everything between them is generated to illustrate a plausible
+            path. Do not cite these hop addresses, ISPs or timings as evidence — they are marked as
+            simulated in exports for the same reason.
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-sm text-rose-200"
+        >
+          {error}
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2 mb-1">
             <GitCommit className="w-5 h-5 text-cyan-400 rotate-90" />
-            <h1 className="text-xl font-bold text-slate-100">
-              Traceroute (TRACERT) Route Inspector
-            </h1>
-            <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 rounded-full uppercase">
-              Interactive Hop Map
+            <h1 className="text-xl font-bold text-slate-100">Route Model (Illustrative)</h1>
+            <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 rounded-full uppercase">
+              Simulated
             </span>
           </div>
           <p className="text-xs text-slate-400 max-w-xl">
-            Trace packet network routes across intermediate routers and Autonomous Systems. Follow every hop step-by-step on a live map with microsecond latency analysis.
+            Resolves the target, looks up the real endpoint location, and draws a plausible
+            great-circle path to it. The intermediate hops are a model, not a measurement.
           </p>
         </div>
 

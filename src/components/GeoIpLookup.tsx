@@ -1,11 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   MapPin,
-  Globe,
   Search,
-  Wifi,
   Shield,
-  Clock,
   Compass,
   ExternalLink,
   Copy,
@@ -13,8 +10,6 @@ import {
   RefreshCw,
   Navigation,
   Server,
-  Building,
-  Flag,
   Radio,
   AlertCircle,
   HelpCircle,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { ToolTab, NetworkConnectionInfo, HistoryItem } from './types';
 import { getNetworkConnectionInfo } from './utils/network';
 import { getHistory, getLocalStorageSizeBytes } from './utils/storage';
@@ -17,7 +17,7 @@ import { HttpProbe } from './components/HttpProbe';
 import { WebSocketTester } from './components/WebSocketTester';
 import { HistoryLog } from './components/HistoryLog';
 import { ExportPage } from './components/ExportPage';
-import { ShieldCheck, HardDrive } from 'lucide-react';
+import { HardDrive } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ToolTab>('dashboard');
@@ -144,13 +144,15 @@ export default function App() {
               <span>NetReady Engine Active</span>
             </span>
             <span className="text-slate-700">|</span>
-            <span className="text-[11px] text-slate-400">100% Client-Side Browser Storage</span>
+            <span className="text-[11px] text-slate-400">
+              No backend · results stored in this browser only
+            </span>
           </div>
 
           <div className="flex items-center space-x-4 font-mono text-[11px] text-slate-500 uppercase">
             <span className="flex items-center space-x-1">
               <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Browser Persistence Online</span>
+              <span>Stored in this browser</span>
             </span>
           </div>
         </div>

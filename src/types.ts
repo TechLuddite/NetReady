@@ -24,18 +24,54 @@ export interface NetworkConnectionInfo {
   onlineSince?: string;
 }
 
+/**
+ * Why a value is absent.
+ *
+ * NetReady reports `null` for anything it could not measure, never a plausible
+ * substitute. Earlier versions filled failures in with invented numbers
+ * (`navigator.connection.downlink || 25`, `uploadSpeed = downloadSpeed * 0.4`,
+ * `ping = 18`), which meant an offline user received a complete, confident,
+ * entirely fictional report — and exported it to CSV. A missing measurement is
+ * information; a fabricated one is not.
+ */
+export type FailureReason =
+  | 'cors-blocked'
+  | 'timeout'
+  | 'network-offline'
+  | 'browser-restricted-port'
+  | 'api-rate-limited'
+  | 'api-unreachable'
+  | 'unsupported-api'
+  | 'insufficient-samples'
+  | 'aborted'
+  | 'not-attempted';
+
+export interface MeasurementFailure {
+  /** Which metric could not be produced, e.g. 'uploadSpeed'. */
+  metric: string;
+  reason: FailureReason;
+  /** One sentence a non-expert can read. Shown in the UI verbatim. */
+  detail: string;
+}
+
 export interface SpeedTestResult {
   id: string;
   timestamp: number;
-  downloadSpeed: number; // Mbps
-  uploadSpeed: number; // Mbps
-  ping: number; // ms
-  jitter: number; // ms
-  loadedPing?: number; // ms under load
-  bufferbloatScore?: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
+  /** Mbps, or null when the transfer produced no measurable bytes. */
+  downloadSpeed: number | null;
+  uploadSpeed: number | null;
+  /** ms, or null when every probe failed. */
+  ping: number | null;
+  /** ms; needs at least two samples, otherwise null. */
+  jitter: number | null;
+  loadedPing?: number | null;
+  /** Only gradeable when both idle and loaded ping were measured. */
+  bufferbloatScore?: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' | null;
   serverName?: string;
   totalBytesDownloaded?: number; // MB
   totalBytesUploaded?: number; // MB
+  /** Everything this run could not determine, and why. */
+  failures?: MeasurementFailure[];
 }
 
 export interface PingPoint {
@@ -53,10 +89,12 @@ export interface PingResult {
   packetsSent: number;
   packetsReceived: number;
   packetLoss: number; // %
-  minPing: number;
-  maxPing: number;
-  avgPing: number;
-  jitter: number;
+  /** null when no packet was answered — an unanswered target has no RTT. */
+  minPing: number | null;
+  maxPing: number | null;
+  avgPing: number | null;
+  /** Needs at least two answered packets. */
+  jitter: number | null;
   points: PingPoint[];
 }
 
@@ -126,7 +164,11 @@ export interface MacLookupResult {
   vendor: string;
   addressType: 'Unicast' | 'Multicast';
   administration: 'Globally Unique (U/L = 0)' | 'Locally Administered (U/L = 1)';
+  /** True only when the OUI is present in the offline IEEE database. */
   isKnown: boolean;
+  /** True when fewer than 12 hex digits were supplied, so only the vendor
+   *  prefix is known and the device half of the address is not. */
+  isPartial?: boolean;
 }
 
 export interface HttpProbeResult {
@@ -248,12 +290,16 @@ export interface HistoryItem {
 }
 
 export interface NetReadyScore {
-  overallScore: number; // 0 - 100
+  overallScore: number; // 0 - 100, averaged over the categories that were scorable
   grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F';
-  gamingScore: number;
-  streamingScore: number;
-  voipScore: number;
-  browsingScore: number;
-  downloadScore: number;
+  /** null when the measurements this category depends on are missing. */
+  gamingScore: number | null;
+  streamingScore: number | null;
+  voipScore: number | null;
+  browsingScore: number | null;
+  downloadScore: number | null;
   details: string[];
+  /** Inputs the score had to do without. A score computed from partial data
+   *  says so rather than quietly filling the gaps with typical values. */
+  missingInputs: string[];
 }

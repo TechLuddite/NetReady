@@ -5,11 +5,9 @@ import {
   Archive,
   CheckSquare,
   Square,
-  Calendar,
   Filter,
   FileText,
   Search,
-  Database,
   Trash2,
   RefreshCw,
   Copy,
@@ -25,7 +23,6 @@ import {
   Calculator,
   Search as SearchIcon,
   HardDrive,
-  Info,
 } from 'lucide-react';
 import { HistoryItem } from '../types';
 import {
@@ -35,7 +32,6 @@ import {
 } from '../utils/storage';
 import {
   TEST_TYPES,
-  TestTypeId,
   exportSingleCsv,
   exportBundledZip,
   generateMasterSummaryCsv,
