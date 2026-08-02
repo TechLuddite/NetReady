@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Terminal, Play, RefreshCw, CheckCircle2, AlertCircle, Radio } from 'lucide-react';
+import { Terminal, Play, RefreshCw } from 'lucide-react';
 import { WebSocketResult, HistoryItem } from '../types';
 import { testWebSocket } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';

@@ -3,12 +3,8 @@ import {
   Radar,
   Play,
   RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  ShieldAlert,
   Wifi,
   Server,
-  Layers,
   Cpu,
   Search,
   Filter,
@@ -18,7 +14,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { PortScanResult, PortStatus, HistoryItem } from '../types';
-import { scanPortList, COMMON_PORTS, gatherWebRtcCandidates } from '../utils/network';
+import { scanPortList, gatherWebRtcCandidates } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 
@@ -122,7 +118,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
         setTargetHost('127.0.0.1');
         setDetectedSubnetInfo('Local interface fallback: 127.0.0.1 (Loopback)');
       }
-    } catch (e) {
+    } catch {
       setDetectedSubnetInfo('Local interface fallback: 127.0.0.1');
     } finally {
       setDetectingSubnet(false);

@@ -97,7 +97,7 @@ export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
         };
       }
     }
-  } catch (e) {
+  } catch {
     // try secondary fallback
   }
 
@@ -119,7 +119,7 @@ export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
         };
       }
     }
-  } catch (e) {
+  } catch {
     // fallback default
   }
 
@@ -157,7 +157,7 @@ export async function getClientGeoLocation(): Promise<GeoIpInfo> {
         };
       }
     }
-  } catch (e) {
+  } catch {
     // secondary fallback
   }
 
@@ -208,7 +208,7 @@ export async function executeTraceroute(
       if (dnsRes.records.length > 0) {
         targetIp = dnsRes.records[0].data;
       }
-    } catch (e) {
+    } catch {
       // Keep targetIp as cleanTarget
     }
   }
@@ -369,10 +369,10 @@ export async function executeTraceroute(
 
   // Try real latency measurement to destination
   try {
-    const probeRes = await fetch(`https://${cleanTarget}/`, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' });
+    await fetch(`https://${cleanTarget}/`, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' });
     const elapsed = Math.round(performance.now() - finalRttStart);
     if (elapsed > 0) measuredFinalPing = elapsed;
-  } catch (e) {
+  } catch {
     // fallback
   }
 

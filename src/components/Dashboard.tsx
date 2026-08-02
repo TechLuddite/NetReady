@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Activity,
   Gauge,
   Radio,
   Globe,
@@ -10,9 +9,6 @@ import {
   Server,
   Terminal,
   History,
-  Play,
-  CheckCircle2,
-  AlertTriangle,
   Zap,
   ArrowRight,
   ShieldCheck,
@@ -27,13 +23,48 @@ import { ToolTab, NetworkConnectionInfo, SpeedTestResult, PingResult, HistoryIte
 import {
   runSpeedTest,
   executePingBatch,
-  queryDnsOverHttps,
   gatherWebRtcCandidates,
   calculateNetReadyScore,
+  createId,
 } from '../utils/network';
+import { displayMetric } from './MetricValue';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 import { TrafficMonitor } from './TrafficMonitor';
+
+/**
+ * One category readiness bar. A category with no measurement behind it shows an
+ * em-dash and an empty track, not a zero-width bar that reads as "scored 0".
+ */
+const ScoreBar: React.FC<{ label: string; score: number | null }> = ({ label, score }) => (
+  <div>
+    <div className="flex justify-between text-xs mb-1">
+      <span className="text-slate-400">{label}</span>
+      <span
+        className={`font-mono font-semibold ${score === null ? 'text-slate-600' : 'text-cyan-400'}`}
+        title={score === null ? 'Not enough measurements to score this category.' : undefined}
+      >
+        {score === null ? '—' : `${score}%`}
+      </span>
+    </div>
+    <div
+      className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden"
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={score ?? undefined}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuetext={score === null ? 'not measured' : `${score} percent`}
+    >
+      {score !== null && (
+        <div
+          className="bg-cyan-500 h-full rounded-full transition-all duration-500"
+          style={{ width: `${score}%` }}
+        />
+      )}
+    </div>
+  </div>
+);
 
 interface DashboardProps {
   setActiveTab: (tab: ToolTab) => void;
@@ -54,6 +85,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [latestPing, setLatestPing] = useState<PingResult | null>(null);
   const [publicIp, setPublicIp] = useState<string | null>(null);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
 
   // Load existing test results from history on mount (do NOT auto-run any test)
   useEffect(() => {
@@ -64,34 +96,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (pingItem) setLatestPing(pingItem.data);
   }, [history]);
 
-  const hasMeasured = Boolean(latestSpeed || latestPing);
+  // Null until enough has been measured to score anything. The score is never
+  // computed from stand-in values.
   const netReadyScore = calculateNetReadyScore(latestSpeed, latestPing);
+  const hasMeasured = netReadyScore !== null;
 
   const executeFullAudit = async () => {
     setIsAuditing(true);
+    setAuditError(null);
     try {
-      setAuditStep('1/3 Testing Ping & Latency Jitter...');
+      setAuditStep('1 of 3 — measuring latency and jitter');
       const pingRes = await executePingBatch('https://1.1.1.1/cdn-cgi/trace', 'Cloudflare (1.1.1.1)', 8);
       setLatestPing(pingRes);
 
-      setAuditStep('2/3 Measuring Bandwidth via Cloudflare CDN Edge...');
-      const speedRes = await runSpeedTest(undefined, 'cloudflare');
+      setAuditStep('2 of 3 — measuring bandwidth via the Cloudflare edge');
+      const speedRes = await runSpeedTest();
       setLatestSpeed(speedRes);
 
-      setAuditStep('3/3 Gathering WebRTC ICE & DoH Diagnostics...');
+      setAuditStep('3 of 3 — gathering WebRTC ICE candidates');
       const rtcRes = await gatherWebRtcCandidates();
       if (rtcRes.publicIps.length > 0) {
         setPublicIp(rtcRes.publicIps[0]);
       }
 
-      // Save complete audit result to LocalStorage
       const score = calculateNetReadyScore(speedRes, pingRes);
       const auditItem: HistoryItem = {
-        id: 'audit_' + Date.now(),
+        id: createId('audit'),
         type: 'speedtest',
         timestamp: Date.now(),
-        title: `Full Audit: Grade ${score.grade} (${score.overallScore}%)`,
-        summary: `Cloudflare CDN | Download: ${speedRes.downloadSpeed} Mbps | Ping: ${pingRes.avgPing} ms | Jitter: ${pingRes.jitter} ms`,
+        title: score
+          ? `Full audit: grade ${score.grade} (${score.overallScore}%)`
+          : 'Full audit: not scorable — no measurement succeeded',
+        summary: `Cloudflare CDN | Download: ${displayMetric(
+          speedRes.downloadSpeed,
+          'Mbps',
+          2,
+        )} | Ping: ${displayMetric(pingRes.avgPing, 'ms')} | Jitter: ${displayMetric(
+          pingRes.jitter,
+          'ms',
+        )}`,
         data: speedRes,
       };
 
@@ -99,6 +142,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
       onHistoryUpdate();
     } catch (e) {
       console.error('Audit failed:', e);
+      setAuditError(
+        e instanceof Error
+          ? `The audit could not complete: ${e.message}`
+          : 'The audit could not complete.',
+      );
     } finally {
       setIsAuditing(false);
       setAuditStep('');
@@ -113,8 +161,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     executeFullAudit();
   };
 
-  const getGradeColor = (grade: string) => {
-    if (!hasMeasured) return 'text-slate-500 bg-slate-800/50 border-slate-700/50';
+  const getGradeColor = (grade?: string) => {
+    if (!grade) return 'text-slate-500 bg-slate-800/50 border-slate-700/50';
     switch (grade) {
       case 'A+':
       case 'A':
@@ -148,15 +196,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Network Readiness Score
               </h1>
               <p className="text-xs text-slate-400 max-w-lg leading-relaxed">
-                Calculated using browser-native metrics, ping roundtrips, jitter variance, and bandwidth throughput benchmarked via Cloudflare CDN Edge.
+                Derived from measured round-trip latency, jitter and throughput against the
+                Cloudflare edge. Categories whose inputs could not be measured are left blank
+                rather than scored from typical values.
               </p>
             </div>
 
-            {/* Score Display Circle */}
+            {/* Score. `netReadyScore` is null until something has actually been
+                measured — there is no "typical value" fallback behind it. */}
             <div className="flex items-center space-x-4 bg-slate-800/80 p-4 rounded-2xl border border-slate-700/60 shadow-inner">
               <div className="text-center">
-                <div className={`text-4xl font-extrabold border px-4 py-1 rounded-xl font-mono ${getGradeColor(netReadyScore.grade)}`}>
-                  {hasMeasured ? netReadyScore.grade : '--'}
+                <div
+                  className={`text-4xl font-extrabold border px-4 py-1 rounded-xl font-mono ${getGradeColor(
+                    netReadyScore?.grade,
+                  )}`}
+                >
+                  {netReadyScore?.grade ?? '--'}
                 </div>
                 <div className="text-[10px] text-slate-400 font-medium uppercase mt-1">Grade</div>
               </div>
@@ -165,81 +220,75 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
               <div>
                 <div className="text-3xl font-extrabold text-white font-mono">
-                  {hasMeasured ? netReadyScore.overallScore : '--'}<span className="text-lg text-slate-400">%</span>
+                  {netReadyScore?.overallScore ?? '--'}
+                  <span className="text-lg text-slate-400">%</span>
                 </div>
-                <div className="text-[10px] text-slate-400 font-medium uppercase">Overall Score</div>
+                <div className="text-[10px] text-slate-400 font-medium uppercase">Overall score</div>
               </div>
             </div>
           </div>
 
-          {/* Application Category Suitability Bars */}
+          {/* Application category suitability */}
           <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-800">
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">Gaming</span>
-                <span className="font-mono text-cyan-400 font-semibold">{hasMeasured ? `${netReadyScore.gamingScore}%` : '--'}</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-cyan-500 h-full rounded-full transition-all duration-500" style={{ width: `${hasMeasured ? netReadyScore.gamingScore : 0}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">4K Video</span>
-                <span className="font-mono text-cyan-400 font-semibold">{hasMeasured ? `${netReadyScore.streamingScore}%` : '--'}</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-cyan-500 h-full rounded-full transition-all duration-500" style={{ width: `${hasMeasured ? netReadyScore.streamingScore : 0}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">VoIP / Calls</span>
-                <span className="font-mono text-cyan-400 font-semibold">{hasMeasured ? `${netReadyScore.voipScore}%` : '--'}</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-cyan-500 h-full rounded-full transition-all duration-500" style={{ width: `${hasMeasured ? netReadyScore.voipScore : 0}%` }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-400">Large Files</span>
-                <span className="font-mono text-cyan-400 font-semibold">{hasMeasured ? `${netReadyScore.downloadScore}%` : '--'}</span>
-              </div>
-              <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-cyan-500 h-full rounded-full transition-all duration-500" style={{ width: `${hasMeasured ? netReadyScore.downloadScore : 0}%` }} />
-              </div>
-            </div>
+            <ScoreBar label="Gaming" score={netReadyScore?.gamingScore ?? null} />
+            <ScoreBar label="4K Video" score={netReadyScore?.streamingScore ?? null} />
+            <ScoreBar label="VoIP / Calls" score={netReadyScore?.voipScore ?? null} />
+            <ScoreBar label="Large Files" score={netReadyScore?.downloadScore ?? null} />
           </div>
 
-          {/* Audit Action Button */}
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
-            <button
-              onClick={handleRunFullAudit}
-              disabled={isAuditing}
-              className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/20 active:scale-95 disabled:opacity-50"
+          {auditError && (
+            <div
+              role="alert"
+              className="mt-4 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 text-xs text-rose-200"
             >
-              {isAuditing ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                  <span>{auditStep || 'Auditing Network...'}</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4 text-white" />
-                  <span>{hasMeasured ? 'Re-Run Full NetReady Audit' : 'Run Readiness Baseline Test'}</span>
-                </>
-              )}
-            </button>
+              {auditError}
+            </div>
+          )}
 
-            <p className="text-xs text-slate-400 italic">
-              {hasMeasured && netReadyScore.details.length > 0
-                ? `"${netReadyScore.details[0]}"`
-                : 'Readiness baseline test not yet executed. Click button to benchmark connection.'}
-            </p>
+          {/* Audit action */}
+          <div className="mt-6 space-y-3">
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                onClick={handleRunFullAudit}
+                disabled={isAuditing}
+                className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/20 active:scale-95 disabled:opacity-50"
+              >
+                {isAuditing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>{auditStep || 'Auditing network...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 text-white" />
+                    <span>{hasMeasured ? 'Re-run full audit' : 'Run readiness baseline test'}</span>
+                  </>
+                )}
+              </button>
+
+              {isAuditing && (
+                <span aria-live="polite" className="sr-only">
+                  {auditStep}
+                </span>
+              )}
+            </div>
+
+            {/* Every generated finding is shown. Previously only the first of
+                three was rendered and the other two were dead code. */}
+            {netReadyScore ? (
+              <ul className="space-y-1 text-xs text-slate-400 leading-relaxed">
+                {netReadyScore.details.map((d) => (
+                  <li key={d} className="flex gap-2">
+                    <span className="text-cyan-500 shrink-0">-</span>
+                    <span>{d}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-slate-400">
+                No baseline yet. Run the audit to measure latency, jitter and throughput.
+              </p>
+            )}
           </div>
         </div>
 

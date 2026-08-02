@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ShieldAlert, CheckSquare, Square, X, Lock, Server, Check } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, Square, X, Lock, Check } from 'lucide-react';
 
 interface ResponsibleNetworkingModalProps {
   isOpen: boolean;
@@ -13,7 +13,7 @@ export const RESPONSIBLE_NETWORKING_STORAGE_KEY = 'netready_responsible_networki
 export const isResponsibleNetworkingAccepted = (): boolean => {
   try {
     return localStorage.getItem(RESPONSIBLE_NETWORKING_STORAGE_KEY) === 'true';
-  } catch (e) {
+  } catch {
     return false;
   }
 };

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Cpu, Play, RefreshCw, ShieldAlert, Wifi, Globe, CheckCircle2 } from 'lucide-react';
+import { Cpu, Play, RefreshCw, ShieldAlert, Wifi, Globe } from 'lucide-react';
 import { WebRtcResult, HistoryItem } from '../types';
 import { gatherWebRtcCandidates } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';

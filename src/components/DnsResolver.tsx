@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Globe, Search, RefreshCw, CheckCircle2, AlertCircle, Copy, Code, Zap } from 'lucide-react';
+import { Globe, Search, RefreshCw, CheckCircle2, Copy, Code } from 'lucide-react';
 import { DnsQueryResult, HistoryItem } from '../types';
 import { queryDnsOverHttps } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';

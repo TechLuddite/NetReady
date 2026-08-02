@@ -3,22 +3,19 @@ import {
   Gauge,
   Play,
   RotateCcw,
-  CheckCircle2,
-  Zap,
   ArrowDown,
   ArrowUp,
   Activity,
   ShieldCheck,
   Server,
-  HardDrive,
-  Info,
   Globe,
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { SpeedTestResult, HistoryItem } from '../types';
-import { runSpeedTest, SpeedTestServerTarget } from '../utils/network';
+import { runSpeedTest, SPEED_TEST_SERVER_NAME } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
+import { MetricValue, FailureNotice, displayMetric } from './MetricValue';
 
 interface SpeedTestProps {
   onHistoryUpdate: () => void;
@@ -28,31 +25,34 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState<'idle' | 'ping' | 'download' | 'upload' | 'complete'>('idle');
   const [progress, setProgress] = useState(0);
-  const [currentDownload, setCurrentDownload] = useState(0);
-  const [currentUpload, setCurrentUpload] = useState(0);
-  const [currentPing, setCurrentPing] = useState(0);
-  const [currentJitter, setCurrentJitter] = useState(0);
-  const [serverTarget, setServerTarget] = useState<SpeedTestServerTarget>('cloudflare');
-  const [serverName, setServerName] = useState<string>('Cloudflare Global Edge CDN');
+  const [currentDownload, setCurrentDownload] = useState<number | null>(null);
+  const [currentUpload, setCurrentUpload] = useState<number | null>(null);
+  const [currentPing, setCurrentPing] = useState<number | null>(null);
+  const [currentJitter, setCurrentJitter] = useState<number | null>(null);
+  const [serverName, setServerName] = useState<string>(SPEED_TEST_SERVER_NAME);
   const [bytesDownloaded, setBytesDownloaded] = useState<number>(0);
   const [bytesUploaded, setBytesUploaded] = useState<number>(0);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [chartData, setChartData] = useState<{ time: number; download: number; upload: number }[]>([]);
+  const [chartData, setChartData] = useState<
+    { time: number; download: number | null; upload: number | null }[]
+  >([]);
   const [result, setResult] = useState<SpeedTestResult | null>(null);
 
   const executeTest = async () => {
     setIsRunning(true);
     setStage('ping');
     setProgress(0);
-    setCurrentDownload(0);
-    setCurrentUpload(0);
-    setCurrentPing(0);
-    setCurrentJitter(0);
+    setCurrentDownload(null);
+    setCurrentUpload(null);
+    setCurrentPing(null);
+    setCurrentJitter(null);
     setBytesDownloaded(0);
     setBytesUploaded(0);
     setChartData([]);
     setResult(null);
+    setError(null);
 
     let sec = 0;
     const interval = setInterval(() => {
@@ -79,29 +79,43 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
             upload: data.uploadSpeed,
           },
         ]);
-      }, serverTarget);
+      });
 
-      clearInterval(interval);
       setResult(res);
 
-      // Save to LocalStorage
       const historyItem: HistoryItem = {
         id: res.id,
         type: 'speedtest',
         timestamp: res.timestamp,
-        title: `Speed Test: ${res.downloadSpeed} Mbps Down / ${res.uploadSpeed} Mbps Up`,
-        summary: `Server: ${res.serverName || 'App Server'} | Ping: ${res.ping} ms | Download: ${res.totalBytesDownloaded || 0} MB`,
+        title: `Speed Test: ${displayMetric(res.downloadSpeed, 'Mbps', 2)} down / ${displayMetric(
+          res.uploadSpeed,
+          'Mbps',
+          2,
+        )} up`,
+        summary: `${res.serverName ?? SPEED_TEST_SERVER_NAME} | Ping: ${displayMetric(
+          res.ping,
+          'ms',
+        )} | Transferred: ${res.totalBytesDownloaded ?? 0} MB`,
         data: res,
       };
 
       saveHistoryItem(historyItem);
       onHistoryUpdate();
-    } catch (e) {
-      console.error('Speed test error:', e);
-    } finally {
-      setIsRunning(false);
       setStage('complete');
       setProgress(100);
+    } catch (e) {
+      // A thrown test is a failed test. It must not render as a completed one.
+      console.error('Speed test error:', e);
+      setError(
+        e instanceof Error
+          ? `The speed test could not run: ${e.message}`
+          : 'The speed test could not run.',
+      );
+      setStage('idle');
+      setProgress(0);
+    } finally {
+      clearInterval(interval);
+      setIsRunning(false);
     }
   };
 
@@ -113,7 +127,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
     executeTest();
   };
 
-  const getBufferbloatColor = (grade?: string) => {
+  const getBufferbloatColor = (grade?: string | null) => {
     switch (grade) {
       case 'A+':
       case 'A':
@@ -142,7 +156,9 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
             </h1>
           </div>
           <p className="text-xs text-slate-400 max-w-xl">
-            Multi-threaded streaming throughput engine. Measures real-time chunked data transfers directly against app server endpoints or global CDN nodes.
+            Streams real data over three concurrent connections and reports throughput from the
+            bytes that actually moved. Anything the test cannot measure is shown as “—”, never
+            estimated.
           </p>
         </div>
 
@@ -165,51 +181,30 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
         </button>
       </div>
 
-      {/* Target Server Configurator */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {error && (
+        <div
+          role="alert"
+          className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-sm text-rose-200"
+        >
+          {error}
+        </div>
+      )}
+
+      <FailureNotice failures={result?.failures} />
+
+      {/* Test endpoint. This used to be a three-way selector whose "Auto-Detect
+          Best" option never compared anything and whose "App Server" option
+          pointed at a backend that does not exist in the static build. */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center space-x-2">
           <Server className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Test Endpoint Server:
+            Test endpoint
           </span>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setServerTarget('auto')}
-            disabled={isRunning}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all border ${
-              serverTarget === 'auto'
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
-                : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700/60'
-            }`}
-          >
-            Auto-Detect Best
-          </button>
-
-          <button
-            onClick={() => setServerTarget('app_server')}
-            disabled={isRunning}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all border ${
-              serverTarget === 'app_server'
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
-                : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700/60'
-            }`}
-          >
-            App Server (Express Backend)
-          </button>
-
-          <button
-            onClick={() => setServerTarget('cloudflare')}
-            disabled={isRunning}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all border ${
-              serverTarget === 'cloudflare'
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
-                : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700/60'
-            }`}
-          >
-            Cloudflare CDN Edge (Default)
-          </button>
+        <div className="text-xs text-slate-400 font-mono">
+          <span className="text-cyan-300">{serverName}</span>
+          <span className="text-slate-600"> — speed.cloudflare.com, reached directly from your browser</span>
         </div>
       </div>
 
@@ -229,7 +224,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
 
           <div className="my-4 text-center">
             <div className="text-4xl font-extrabold font-mono text-white">
-              {currentDownload > 0 ? currentDownload : '--'}
+              <MetricValue value={currentDownload} precision={2} unavailableClassName="text-slate-700" />
             </div>
             <div className="text-xs text-slate-400 mt-1 uppercase font-medium">Mbps</div>
             <div className="text-[10px] font-mono text-slate-500 mt-0.5">
@@ -240,7 +235,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-cyan-400 h-full transition-all duration-300"
-              style={{ width: `${Math.min(100, (currentDownload / 150) * 100)}%` }}
+              style={{ width: `${Math.min(100, ((currentDownload ?? 0) / 150) * 100)}%` }}
             />
           </div>
         </div>
@@ -259,7 +254,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
 
           <div className="my-4 text-center">
             <div className="text-4xl font-extrabold font-mono text-white">
-              {currentUpload > 0 ? currentUpload : '--'}
+              <MetricValue value={currentUpload} precision={2} unavailableClassName="text-slate-700" />
             </div>
             <div className="text-xs text-slate-400 mt-1 uppercase font-medium">Mbps</div>
             <div className="text-[10px] font-mono text-slate-500 mt-0.5">
@@ -270,7 +265,7 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-blue-400 h-full transition-all duration-300"
-              style={{ width: `${Math.min(100, (currentUpload / 100) * 100)}%` }}
+              style={{ width: `${Math.min(100, ((currentUpload ?? 0) / 100) * 100)}%` }}
             />
           </div>
         </div>
@@ -289,15 +284,19 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
 
           <div className="my-4 text-center">
             <div className="text-4xl font-extrabold font-mono text-white">
-              {currentPing > 0 ? currentPing : '--'}
+              <MetricValue value={currentPing} unavailableClassName="text-slate-700" />
             </div>
             <div className="text-xs text-slate-400 mt-1 uppercase font-medium">
-              ms (Jitter: {currentJitter}ms)
+              ms (Jitter: {displayMetric(currentJitter, 'ms')})
             </div>
           </div>
 
           <div className="text-[11px] text-slate-400 text-center font-mono">
-            {currentPing < 30 && currentPing > 0 ? 'Excellent Latency' : currentPing > 0 ? 'Standard Response' : 'Idle'}
+            {currentPing === null
+              ? 'Not measured'
+              : currentPing < 30
+                ? 'Excellent latency'
+                : 'Standard response'}
           </div>
         </div>
 

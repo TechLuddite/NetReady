@@ -12,7 +12,32 @@ import {
   NetReadyScore,
   PortStatus,
   PortScanResult,
+  MeasurementFailure,
 } from '../types';
+
+/**
+ * Mean absolute difference between consecutive samples — the definition of
+ * jitter used throughout NetReady.
+ *
+ * Returns null for fewer than two samples. This matters: the same calculation
+ * used to be inlined in three places, each with a different invented fallback
+ * (`0`, `2`, and `3`), so a test that produced one usable sample would report a
+ * confident jitter figure derived from nothing.
+ */
+export function meanConsecutiveDelta(samples: readonly number[]): number | null {
+  if (samples.length < 2) return null;
+  let diffSum = 0;
+  for (let i = 0; i < samples.length - 1; i++) {
+    diffSum += Math.abs(samples[i + 1] - samples[i]);
+  }
+  return Math.round(diffSum / (samples.length - 1));
+}
+
+/** Collision-resistant id. `Date.now()` alone produced duplicate React keys and
+ *  made `deleteHistoryItem` remove two records at once. */
+export function createId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
 
 export function getNetworkConnectionInfo(): NetworkConnectionInfo {
   const nav = navigator as any;
@@ -64,9 +89,14 @@ export async function executePingBatch(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-      const resp = await fetch(fullUrl, {
+      // `no-cors` keeps cross-origin probes from failing on CORS policy, but the
+      // response is opaque: its status code is unreadable by construction, and it
+      // resolves for a 404, a 500 or a captive-portal redirect just as happily as
+      // for a 200. So this measures reachability and round-trip time only — it
+      // deliberately makes no claim about the HTTP status.
+      await fetch(fullUrl, {
         method: 'HEAD',
-        mode: 'no-cors', // ensures cross-origin ping doesn't fail on CORS policies
+        mode: 'no-cors',
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -107,10 +137,12 @@ export async function executePingBatch(
   const received = validPoints.length;
   const packetLoss = sent > 0 ? Math.round(((sent - received) / sent) * 100) : 100;
 
-  let minPing = 0;
-  let maxPing = 0;
-  let avgPing = 0;
-  let jitter = 0;
+  // A target that answered nothing has no round-trip time. Reporting 0 ms there
+  // would read as "instantaneous" — the opposite of what happened.
+  let minPing: number | null = null;
+  let maxPing: number | null = null;
+  let avgPing: number | null = null;
+  let jitter: number | null = null;
 
   if (validPoints.length > 0) {
     const times = validPoints.map((p) => p.time);
@@ -119,18 +151,13 @@ export async function executePingBatch(
     const sum = times.reduce((a, b) => a + b, 0);
     avgPing = Math.round(sum / times.length);
 
-    // Calculate jitter (mean difference between consecutive samples)
-    if (times.length > 1) {
-      let diffSum = 0;
-      for (let k = 0; k < times.length - 1; k++) {
-        diffSum += Math.abs(times[k + 1] - times[k]);
-      }
-      jitter = Math.round(diffSum / (times.length - 1));
-    }
+    // Jitter is the mean difference between consecutive samples, so it is
+    // undefined for a single sample. It stays null rather than becoming 0.
+    jitter = meanConsecutiveDelta(times);
   }
 
   return {
-    id: 'ping_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    id: createId('ping'),
     timestamp: Date.now(),
     target: targetUrl,
     label: targetName,
@@ -145,339 +172,309 @@ export async function executePingBatch(
   };
 }
 
-// Bandwidth Speed Test Engine
-export type SpeedTestServerTarget = 'app_server' | 'cloudflare' | 'auto';
+// ---------------------------------------------------------------------------
+// Bandwidth speed test
+//
+// Every figure this produces is derived from bytes that actually moved. When a
+// phase fails it reports null plus a reason, and the caller renders "—". The
+// previous implementation substituted `navigator.connection.downlink || 25` for
+// a failed download, `downloadSpeed * 0.4` for a failed upload, `18`/`3` for
+// failed pings, and counted half of every un-sent upload chunk as transferred —
+// so a machine with no connectivity at all still produced a full report card.
+// ---------------------------------------------------------------------------
+
+/** Cloudflare's public speed endpoints are the only browser-reachable backend
+ *  NetReady uses: CORS-enabled, anycast, and no NetReady server involved. */
+export type SpeedTestServerTarget = 'cloudflare';
+
+export const SPEED_TEST_SERVER_NAME = 'Cloudflare Global Edge CDN';
+
+const DOWNLOAD_URL = 'https://speed.cloudflare.com/__down?bytes=25000000';
+const UPLOAD_URL = 'https://speed.cloudflare.com/__up';
+const LATENCY_URL = 'https://speed.cloudflare.com/__down?bytes=0';
+
+/** Transfer measured before the connection reaches steady state understates
+ *  throughput. Bytes in this opening window are excluded from the final figure
+ *  (but still shown live, so the meter does not sit at zero). */
+const RAMP_UP_MS = 1000;
+const DOWNLOAD_WINDOW_MS = 5000;
+const UPLOAD_WINDOW_MS = 4000;
+const LATENCY_SAMPLES = 6;
 
 export interface SpeedTestProgressData {
   stage: 'idle' | 'ping' | 'download' | 'upload' | 'complete';
-  downloadSpeed: number; // Mbps
-  uploadSpeed: number; // Mbps
-  ping: number; // ms
-  jitter: number; // ms
+  downloadSpeed: number | null; // Mbps
+  uploadSpeed: number | null; // Mbps
+  ping: number | null; // ms
+  jitter: number | null; // ms
   progress: number; // 0-100
   serverName: string;
-  totalBytesDownloaded: number; // Bytes
-  totalBytesUploaded: number; // Bytes
+  totalBytesDownloaded: number; // bytes
+  totalBytesUploaded: number; // bytes
+}
+
+function mbps(bytes: number, elapsedMs: number): number | null {
+  if (bytes <= 0 || elapsedMs <= 0) return null;
+  return parseFloat(((bytes * 8) / ((elapsedMs / 1000) * 1_000_000)).toFixed(2));
 }
 
 export async function runSpeedTest(
   onProgress?: (data: SpeedTestProgressData) => void,
-  serverTarget: SpeedTestServerTarget = 'cloudflare'
+  signal?: AbortSignal,
 ): Promise<SpeedTestResult> {
-  let downloadSpeed = 0;
-  let uploadSpeed = 0;
-  let ping = 0;
-  let jitter = 0;
-  let loadedPing = 0;
+  const failures: MeasurementFailure[] = [];
+  const serverName = SPEED_TEST_SERVER_NAME;
+
+  let downloadSpeed: number | null = null;
+  let uploadSpeed: number | null = null;
+  let ping: number | null = null;
+  let jitter: number | null = null;
+  let loadedPing: number | null = null;
   let totalBytesDownloaded = 0;
   let totalBytesUploaded = 0;
 
-  // Resolve server target
-  let activeTarget: 'app_server' | 'cloudflare' = 'app_server';
-  let serverName = 'Local App Server (Express)';
+  const report = (stage: SpeedTestProgressData['stage'], progress: number) => {
+    onProgress?.({
+      stage,
+      downloadSpeed,
+      uploadSpeed,
+      ping,
+      jitter,
+      progress,
+      serverName,
+      totalBytesDownloaded,
+      totalBytesUploaded,
+    });
+  };
 
-  if (serverTarget === 'cloudflare') {
-    activeTarget = 'cloudflare';
-    serverName = 'Cloudflare Global Edge CDN';
-  } else if (serverTarget === 'auto' || serverTarget === 'app_server') {
-    try {
-      const startProbe = performance.now();
-      const probe = await fetch('/api/speedtest/ping?probe=' + Date.now(), { cache: 'no-store' });
-      if (probe.ok && performance.now() - startProbe < 2000) {
-        activeTarget = 'app_server';
-        serverName = 'Local App Server (Express)';
-      } else {
-        activeTarget = 'cloudflare';
-        serverName = 'Cloudflare Global Edge CDN';
-      }
-    } catch (e) {
-      activeTarget = 'cloudflare';
-      serverName = 'Cloudflare Global Edge CDN';
-    }
-  }
-
-  // 1. Initial Ping & Jitter Phase
-  if (onProgress) {
-    onProgress({
-      stage: 'ping',
-      downloadSpeed: 0,
-      uploadSpeed: 0,
-      ping: 0,
-      jitter: 0,
-      progress: 5,
+  if (!navigator.onLine) {
+    failures.push({
+      metric: 'all',
+      reason: 'network-offline',
+      detail: 'The browser reports no network connection, so nothing was measured.',
+    });
+    report('complete', 100);
+    return {
+      id: createId('speed'),
+      timestamp: Date.now(),
+      downloadSpeed: null,
+      uploadSpeed: null,
+      ping: null,
+      jitter: null,
+      loadedPing: null,
+      bufferbloatScore: null,
       serverName,
       totalBytesDownloaded: 0,
       totalBytesUploaded: 0,
-    });
+      failures,
+    };
   }
 
-  const pingTimes: number[] = [];
-  const pingUrl =
-    activeTarget === 'app_server'
-      ? '/api/speedtest/ping'
-      : 'https://1.1.1.1/cdn-cgi/trace';
+  // --- 1. Idle latency -----------------------------------------------------
+  report('ping', 5);
 
-  for (let i = 0; i < 6; i++) {
+  const pingTimes: number[] = [];
+  for (let i = 0; i < LATENCY_SAMPLES; i++) {
+    if (signal?.aborted) break;
     const start = performance.now();
     try {
-      const cacheBuster = `?_p=${Date.now()}_${i}_${Math.random()}`;
-      await fetch(pingUrl + cacheBuster, { cache: 'no-store', mode: activeTarget === 'app_server' ? 'same-origin' : 'no-cors' });
-      const duration = Math.round(performance.now() - start);
-      if (duration > 0) pingTimes.push(duration);
-    } catch (e) {
-      // ignore single drop
+      await fetch(`${LATENCY_URL}&_p=${Date.now()}_${i}`, { cache: 'no-store', signal });
+      pingTimes.push(Math.round(performance.now() - start));
+    } catch {
+      /* a dropped sample is a dropped sample; it is not a latency figure */
     }
     await new Promise((r) => setTimeout(r, 60));
   }
 
   if (pingTimes.length > 0) {
     ping = Math.round(pingTimes.reduce((a, b) => a + b, 0) / pingTimes.length);
-    let diffSum = 0;
-    for (let k = 0; k < pingTimes.length - 1; k++) {
-      diffSum += Math.abs(pingTimes[k + 1] - pingTimes[k]);
+    jitter = meanConsecutiveDelta(pingTimes);
+    if (jitter === null) {
+      failures.push({
+        metric: 'jitter',
+        reason: 'insufficient-samples',
+        detail: 'Only one latency sample succeeded. Jitter needs at least two.',
+      });
     }
-    jitter = pingTimes.length > 1 ? Math.round(diffSum / (pingTimes.length - 1)) : 2;
   } else {
-    ping = 18;
-    jitter = 3;
-  }
-
-  // 2. Multi-Stream Real-Time Streaming Download Phase
-  if (onProgress) {
-    onProgress({
-      stage: 'download',
-      downloadSpeed: 0,
-      uploadSpeed: 0,
-      ping,
-      jitter,
-      progress: 20,
-      serverName,
-      totalBytesDownloaded: 0,
-      totalBytesUploaded: 0,
+    failures.push({
+      metric: 'ping',
+      reason: 'api-unreachable',
+      detail: `No latency sample reached ${serverName}. It may be blocked on this network.`,
+    });
+    failures.push({
+      metric: 'jitter',
+      reason: 'insufficient-samples',
+      detail: 'Jitter cannot be derived without latency samples.',
     });
   }
 
+  // --- 2. Download ---------------------------------------------------------
+  report('download', 20);
+
   const downloadStart = performance.now();
-  const downloadDurationMs = 4500; // 4.5 seconds test window
+  let steadyStateBytes = 0;
+  let steadyStateStart: number | null = null;
   let downloadActive = true;
-  const downloadSamples: number[] = [];
 
-  const downloadUrl =
-    activeTarget === 'app_server'
-      ? '/api/speedtest/download?size=20'
-      : 'https://speed.cloudflare.com/__down?bytes=25000000';
+  const accrue = (byteCount: number) => {
+    totalBytesDownloaded += byteCount;
+    const now = performance.now();
+    if (now - downloadStart >= RAMP_UP_MS) {
+      if (steadyStateStart === null) steadyStateStart = now;
+      else steadyStateBytes += byteCount;
+    }
+  };
 
-  // Spawn 3 concurrent streaming readers
-  const workerCount = 3;
-  const downloadWorkers = Array.from({ length: workerCount }).map(async (_, workerIdx) => {
-    while (downloadActive && performance.now() - downloadStart < downloadDurationMs) {
+  const downloadWorkers = Array.from({ length: 3 }).map(async (_, workerIdx) => {
+    while (downloadActive && performance.now() - downloadStart < DOWNLOAD_WINDOW_MS) {
+      if (signal?.aborted) return;
       try {
-        const cacheBuster = (downloadUrl.includes('?') ? '&' : '?') + `_cb=${Date.now()}_${workerIdx}_${Math.random()}`;
-        const res = await fetch(downloadUrl + cacheBuster, { cache: 'no-store' });
+        const res = await fetch(`${DOWNLOAD_URL}&_cb=${Date.now()}_${workerIdx}`, {
+          cache: 'no-store',
+          signal,
+        });
         if (!res.body) {
-          const blob = await res.blob();
-          totalBytesDownloaded += blob.size;
+          accrue((await res.blob()).size);
           continue;
         }
-
         const reader = res.body.getReader();
         while (downloadActive) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value) {
-            totalBytesDownloaded += value.length;
-          }
+          if (value) accrue(value.length);
         }
-      } catch (err) {
+        await reader.cancel().catch(() => {});
+      } catch {
         await new Promise((r) => setTimeout(r, 100));
       }
     }
   });
 
-  // Sample progress & speed every 100ms
-  let lastBytes = 0;
-  let lastTime = downloadStart;
-
-  const sampleInterval = setInterval(() => {
-    const now = performance.now();
-    const dt = (now - lastTime) / 1000; // seconds
-    const dBytes = totalBytesDownloaded - lastBytes;
-
-    if (dt > 0 && dBytes > 0) {
-      const instantMbps = (dBytes * 8) / (dt * 1000000);
-      downloadSamples.push(instantMbps);
-
-      // Keep recent smoothed moving average (last 8 samples)
-      const recent = downloadSamples.slice(-8);
-      const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-      downloadSpeed = parseFloat(avg.toFixed(2));
-    }
-
-    lastBytes = totalBytesDownloaded;
-    lastTime = now;
-
-    const elapsed = now - downloadStart;
-    const progress = Math.min(60, 20 + Math.round((elapsed / downloadDurationMs) * 40));
-
-    if (onProgress) {
-      onProgress({
-        stage: 'download',
-        downloadSpeed,
-        uploadSpeed: 0,
-        ping,
-        jitter,
-        progress,
-        serverName,
-        totalBytesDownloaded,
-        totalBytesUploaded: 0,
-      });
-    }
+  // Live meter only. The reported figure is computed from the steady-state
+  // window below, not from this smoothed value.
+  const meterInterval = setInterval(() => {
+    const elapsed = performance.now() - downloadStart;
+    downloadSpeed = mbps(totalBytesDownloaded, elapsed);
+    report('download', Math.min(60, 20 + Math.round((elapsed / DOWNLOAD_WINDOW_MS) * 40)));
   }, 100);
 
-  // Measure loaded ping under active download strain
-  setTimeout(async () => {
-    const loadedStart = performance.now();
-    try {
-      await fetch(pingUrl + '?loaded=' + Date.now(), { cache: 'no-store' });
-      loadedPing = Math.round(performance.now() - loadedStart);
-    } catch (e) {
-      loadedPing = ping + 12;
-    }
-  }, 2000);
+  // Latency under load, sampled mid-transfer. This is what makes bufferbloat
+  // visible: the gap between idle and loaded ping.
+  let loadedPingTimer: ReturnType<typeof setTimeout> | undefined;
+  const loadedPingDone = new Promise<void>((resolve) => {
+    loadedPingTimer = setTimeout(async () => {
+      const start = performance.now();
+      try {
+        await fetch(`${LATENCY_URL}&_loaded=${Date.now()}`, { cache: 'no-store', signal });
+        loadedPing = Math.round(performance.now() - start);
+      } catch {
+        /* leave null — an unmeasured loaded ping must not become ping + 14 */
+      }
+      resolve();
+    }, Math.floor(DOWNLOAD_WINDOW_MS / 2));
+  });
 
-  // Wait out download duration
-  await new Promise((r) => setTimeout(r, downloadDurationMs));
+  await new Promise((r) => setTimeout(r, DOWNLOAD_WINDOW_MS));
   downloadActive = false;
-  clearInterval(sampleInterval);
-  await Promise.allSettled(downloadWorkers);
+  clearInterval(meterInterval);
+  if (loadedPingTimer !== undefined) clearTimeout(loadedPingTimer);
+  await Promise.allSettled([...downloadWorkers, loadedPingDone]);
 
-  if (downloadSpeed === 0 && totalBytesDownloaded > 0) {
-    const totalSec = (performance.now() - downloadStart) / 1000;
-    downloadSpeed = parseFloat(((totalBytesDownloaded * 8) / (totalSec * 1000000)).toFixed(2));
-  }
+  const steadyElapsed = steadyStateStart === null ? 0 : performance.now() - steadyStateStart;
+  downloadSpeed =
+    mbps(steadyStateBytes, steadyElapsed) ??
+    mbps(totalBytesDownloaded, performance.now() - downloadStart);
 
-  // Fallback if environment restricted
-  if (downloadSpeed < 0.5) {
-    const connInfo = getNetworkConnectionInfo();
-    downloadSpeed = connInfo.downlink || 25;
-  }
-
-  // 3. Multi-Stream Real-Time Upload Phase
-  if (onProgress) {
-    onProgress({
-      stage: 'upload',
-      downloadSpeed,
-      uploadSpeed: 0,
-      ping,
-      jitter,
-      progress: 65,
-      serverName,
-      totalBytesDownloaded,
-      totalBytesUploaded: 0,
+  if (downloadSpeed === null) {
+    failures.push({
+      metric: 'downloadSpeed',
+      reason: totalBytesDownloaded === 0 ? 'api-unreachable' : 'insufficient-samples',
+      detail:
+        totalBytesDownloaded === 0
+          ? `No bytes arrived from ${serverName}. The transfer was blocked or the network is down.`
+          : 'The transfer was too short to produce a throughput figure.',
     });
   }
 
+  // --- 3. Upload -----------------------------------------------------------
+  report('upload', 65);
+
   const uploadStart = performance.now();
-  const uploadDurationMs = 3500;
-  const uploadSamples: number[] = [];
-  const uploadUrl =
-    activeTarget === 'app_server'
-      ? '/api/speedtest/upload'
-      : 'https://speed.cloudflare.com/__up';
-
-  // 2MB payload chunk for POST
-  const payloadSize = 2 * 1024 * 1024;
-  const payload = new Uint8Array(payloadSize);
-
+  const payload = new Uint8Array(2 * 1024 * 1024);
   let uploadActive = true;
-  const uploadWorkers = Array.from({ length: 2 }).map(async (_, workerIdx) => {
-    while (uploadActive && performance.now() - uploadStart < uploadDurationMs) {
-      const chunkStart = performance.now();
+  let uploadFailed = false;
+
+  const uploadWorkers = Array.from({ length: 2 }).map(async () => {
+    while (uploadActive && performance.now() - uploadStart < UPLOAD_WINDOW_MS) {
+      if (signal?.aborted) return;
       try {
-        await fetch(uploadUrl, {
+        const res = await fetch(UPLOAD_URL, {
           method: 'POST',
           body: payload,
-          mode: activeTarget === 'app_server' ? 'same-origin' : 'cors',
-          headers: { 'Content-Type': 'application/octet-stream' },
+          cache: 'no-store',
+          signal,
         });
-        const chunkDuration = (performance.now() - chunkStart) / 1000;
-        if (chunkDuration > 0) {
-          totalBytesUploaded += payloadSize;
-          const mbps = (payloadSize * 8) / (chunkDuration * 1000000);
-          uploadSamples.push(mbps);
-          const recent = uploadSamples.slice(-6);
-          const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-          uploadSpeed = parseFloat(avg.toFixed(2));
-        }
-      } catch (e) {
-        // Fallback simulation ratio if CORS/POST restricts chunk stream
-        const chunkDuration = Math.max(0.2, (performance.now() - chunkStart) / 1000);
-        totalBytesUploaded += payloadSize / 2;
-        const mbps = Math.max(2.5, downloadSpeed * 0.45);
-        uploadSamples.push(mbps);
-        uploadSpeed = parseFloat(mbps.toFixed(2));
-        await new Promise((r) => setTimeout(r, 150));
-      }
-
-      const elapsed = performance.now() - uploadStart;
-      const progress = Math.min(95, 65 + Math.round((elapsed / uploadDurationMs) * 30));
-
-      if (onProgress) {
-        onProgress({
-          stage: 'upload',
-          downloadSpeed,
-          uploadSpeed,
-          ping,
-          jitter,
-          progress,
-          serverName,
-          totalBytesDownloaded,
-          totalBytesUploaded,
-        });
+        if (!res.ok) throw new Error(`upload rejected: ${res.status}`);
+        // Only bytes the server accepted are counted.
+        totalBytesUploaded += payload.byteLength;
+        uploadSpeed = mbps(totalBytesUploaded, performance.now() - uploadStart);
+        report(
+          'upload',
+          Math.min(95, 65 + Math.round(((performance.now() - uploadStart) / UPLOAD_WINDOW_MS) * 30)),
+        );
+      } catch {
+        uploadFailed = true;
+        return;
       }
     }
   });
 
-  await new Promise((r) => setTimeout(r, uploadDurationMs));
+  await Promise.race([
+    Promise.allSettled(uploadWorkers),
+    new Promise((r) => setTimeout(r, UPLOAD_WINDOW_MS)),
+  ]);
   uploadActive = false;
   await Promise.allSettled(uploadWorkers);
 
-  if (uploadSpeed === 0) {
-    uploadSpeed = parseFloat((downloadSpeed * 0.4).toFixed(2));
-  }
+  // Throughput is aggregate bytes over the window, not the mean of each
+  // worker's individual rate — averaging concurrent streams understated the
+  // real figure by roughly the worker count.
+  uploadSpeed = mbps(totalBytesUploaded, performance.now() - uploadStart);
 
-  if (loadedPing === 0) {
-    loadedPing = ping + 14;
-  }
-
-  // Bufferbloat score calculation
-  const bufferbloatDiff = Math.max(0, loadedPing - ping);
-  let bufferbloatScore: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' = 'A+';
-  if (bufferbloatDiff > 150) bufferbloatScore = 'F';
-  else if (bufferbloatDiff > 90) bufferbloatScore = 'D';
-  else if (bufferbloatDiff > 50) bufferbloatScore = 'C';
-  else if (bufferbloatDiff > 25) bufferbloatScore = 'B';
-  else if (bufferbloatDiff > 10) bufferbloatScore = 'A';
-
-  const totalMbDown = parseFloat((totalBytesDownloaded / (1024 * 1024)).toFixed(2));
-  const totalMbUp = parseFloat((totalBytesUploaded / (1024 * 1024)).toFixed(2));
-
-  if (onProgress) {
-    onProgress({
-      stage: 'complete',
-      downloadSpeed,
-      uploadSpeed,
-      ping,
-      jitter,
-      progress: 100,
-      serverName,
-      totalBytesDownloaded,
-      totalBytesUploaded,
+  if (uploadSpeed === null) {
+    failures.push({
+      metric: 'uploadSpeed',
+      reason: uploadFailed ? 'cors-blocked' : 'api-unreachable',
+      detail: uploadFailed
+        ? 'The upload was rejected before any bytes were accepted, so there is no upload figure.'
+        : `No upload reached ${serverName}.`,
     });
   }
 
+  // --- 4. Bufferbloat ------------------------------------------------------
+  // Gradeable only when both idle and loaded latency were actually measured.
+  let bufferbloatScore: SpeedTestResult['bufferbloatScore'] = null;
+  if (ping !== null && loadedPing !== null) {
+    const delta = Math.max(0, loadedPing - ping);
+    if (delta > 150) bufferbloatScore = 'F';
+    else if (delta > 90) bufferbloatScore = 'D';
+    else if (delta > 50) bufferbloatScore = 'C';
+    else if (delta > 25) bufferbloatScore = 'B';
+    else if (delta > 10) bufferbloatScore = 'A';
+    else bufferbloatScore = 'A+';
+  } else {
+    failures.push({
+      metric: 'bufferbloatScore',
+      reason: 'insufficient-samples',
+      detail: 'Bufferbloat needs both an idle and a under-load latency sample.',
+    });
+  }
+
+  report('complete', 100);
+
   return {
-    id: 'speed_' + Date.now(),
+    id: createId('speed'),
     timestamp: Date.now(),
     downloadSpeed,
     uploadSpeed,
@@ -486,8 +483,9 @@ export async function runSpeedTest(
     loadedPing,
     bufferbloatScore,
     serverName,
-    totalBytesDownloaded: totalMbDown,
-    totalBytesUploaded: totalMbUp,
+    totalBytesDownloaded: parseFloat((totalBytesDownloaded / (1024 * 1024)).toFixed(2)),
+    totalBytesUploaded: parseFloat((totalBytesUploaded / (1024 * 1024)).toFixed(2)),
+    failures: failures.length > 0 ? failures : undefined,
   };
 }
 
@@ -680,7 +678,7 @@ export async function gatherWebRtcCandidates(
 
       // Timeout after 4.5 seconds if gathering takes too long
       setTimeout(finalize, 4500);
-    } catch (err) {
+    } catch {
       finalize();
     }
   });
@@ -776,7 +774,7 @@ export async function testWebSocket(
           ws.send(payload);
           messagesSent++;
 
-          const onMsg = (event: MessageEvent) => {
+          const onMsg = () => {
             const rtt = Math.round(performance.now() - msgStart);
             pings.push(rtt);
             messagesReceived++;
@@ -804,42 +802,60 @@ export async function testWebSocket(
           cleanup(pings.length > 0 ? 'connected' : 'error');
         }
       }, 4000);
-    } catch (e) {
+    } catch {
       cleanup('error');
     }
   });
 }
 
-// NetReady Overall Benchmark Score
+const clampScore = (n: number) => Math.max(10, Math.min(100, Math.round(n)));
+
+/**
+ * NetReady readiness score.
+ *
+ * Returns null when nothing has been measured. Each category is scored only if
+ * the measurements it depends on exist; the rest come back null and are named
+ * in `missingInputs`. The previous version defaulted its inputs to
+ * `dl=30, ul=10, lat=35, jit=5`, so it produced a confident letter grade for a
+ * user who had never run a test — and, because it used `||` rather than `??`,
+ * silently rewrote a genuine 0 Mbps result as 30 Mbps.
+ */
 export function calculateNetReadyScore(
   speed?: SpeedTestResult | null,
-  pingRes?: PingResult | null
-): NetReadyScore {
-  const dl = speed?.downloadSpeed || 30;
-  const ul = speed?.uploadSpeed || 10;
-  const lat = pingRes?.avgPing || speed?.ping || 35;
-  const jit = pingRes?.jitter || speed?.jitter || 5;
+  pingRes?: PingResult | null,
+): NetReadyScore | null {
+  const dl = speed?.downloadSpeed ?? null;
+  const ul = speed?.uploadSpeed ?? null;
+  const lat = pingRes?.avgPing ?? speed?.ping ?? null;
+  const jit = pingRes?.jitter ?? speed?.jitter ?? null;
 
-  // Gaming: Ping < 30ms = 100, > 150ms = 20; Jitter < 5ms = +20
-  let gamingScore = Math.max(10, Math.min(100, Math.round(110 - lat * 0.6 - jit * 2)));
+  const missingInputs: string[] = [];
+  if (dl === null) missingInputs.push('download speed');
+  if (ul === null) missingInputs.push('upload speed');
+  if (lat === null) missingInputs.push('latency');
+  if (jit === null) missingInputs.push('jitter');
 
-  // 4K Streaming: Download > 25 Mbps = 100, Jitter < 15ms
-  let streamingScore = Math.max(10, Math.min(100, Math.round((dl / 30) * 80 + (lat < 50 ? 20 : 0))));
+  // Gaming and VoIP are latency-bound; both need jitter as well.
+  const gamingScore =
+    lat !== null && jit !== null ? clampScore(110 - lat * 0.6 - jit * 2) : null;
+  const voipScore =
+    lat !== null && jit !== null
+      ? clampScore(115 - lat * 0.5 - jit * 3 + (ul !== null && ul > 5 ? 10 : 0))
+      : null;
+  const streamingScore =
+    dl !== null ? clampScore((dl / 30) * 80 + (lat !== null && lat < 50 ? 20 : 0)) : null;
+  const browsingScore =
+    dl !== null && lat !== null ? clampScore((dl / 15) * 60 + (100 - lat * 0.4)) : null;
+  const downloadScore = dl !== null ? clampScore((dl / 100) * 100) : null;
 
-  // VoIP / Video Call: Low Ping & Low Jitter primary
-  let voipScore = Math.max(10, Math.min(100, Math.round(115 - lat * 0.5 - jit * 3 + (ul > 5 ? 10 : 0))));
-
-  // Web Browsing: Ping + Downlink
-  let browsingScore = Math.max(10, Math.min(100, Math.round((dl / 15) * 60 + (100 - lat * 0.4))));
-
-  // Download Score
-  let downloadScore = Math.max(10, Math.min(100, Math.round((dl / 100) * 100)));
-
-  const overallScore = Math.round(
-    gamingScore * 0.25 + streamingScore * 0.25 + voipScore * 0.25 + browsingScore * 0.25
+  const scored = [gamingScore, streamingScore, voipScore, browsingScore].filter(
+    (s): s is number => s !== null,
   );
+  if (scored.length === 0) return null;
 
-  let grade: 'A+' | 'A' | 'B' | 'C' | 'D' | 'F' = 'B';
+  const overallScore = Math.round(scored.reduce((a, b) => a + b, 0) / scored.length);
+
+  let grade: NetReadyScore['grade'];
   if (overallScore >= 92) grade = 'A+';
   else if (overallScore >= 82) grade = 'A';
   else if (overallScore >= 70) grade = 'B';
@@ -847,15 +863,40 @@ export function calculateNetReadyScore(
   else if (overallScore >= 40) grade = 'D';
   else grade = 'F';
 
-  const details = [];
-  if (lat <= 25) details.push('Ultra-low latency (<25ms) ideal for real-time competitive gaming.');
-  else details.push(`Latency is ${lat}ms (typical for standard broadband/wifi).`);
-
-  if (jit <= 5) details.push('Jitter is minimal (<5ms), ensuring smooth voice/video calls.');
-  else details.push(`Jitter is ${jit}ms, which may cause subtle audio stuttering.`);
-
-  if (dl >= 25) details.push(`Download bandwidth (${dl} Mbps) supports multiple 4K streams.`);
-  else details.push(`Download speed (${dl} Mbps) is suitable for HD video and web browsing.`);
+  // Only describe what was actually measured.
+  const details: string[] = [];
+  if (lat !== null) {
+    details.push(
+      lat <= 25
+        ? `Latency is ${lat} ms — low enough for real-time competitive gaming.`
+        : `Latency is ${lat} ms, typical for standard broadband or Wi-Fi.`,
+    );
+  }
+  if (jit !== null) {
+    details.push(
+      jit <= 5
+        ? `Jitter is ${jit} ms, low enough for smooth voice and video calls.`
+        : `Jitter is ${jit} ms, which can cause audible stuttering on calls.`,
+    );
+  }
+  if (dl !== null) {
+    details.push(
+      dl >= 25
+        ? `Download bandwidth (${dl} Mbps) supports multiple 4K streams.`
+        : `Download bandwidth (${dl} Mbps) suits HD video and general browsing.`,
+    );
+  }
+  if (speed?.bufferbloatScore && ['C', 'D', 'F'].includes(speed.bufferbloatScore)) {
+    details.push(
+      `Latency rises sharply under load (bufferbloat grade ${speed.bufferbloatScore}). ` +
+        'This affects calls and gaming more than raw bandwidth does.',
+    );
+  }
+  if (missingInputs.length > 0) {
+    details.push(
+      `Scored without ${missingInputs.join(', ')} — those measurements did not complete.`,
+    );
+  }
 
   return {
     overallScore,
@@ -866,6 +907,7 @@ export function calculateNetReadyScore(
     browsingScore,
     downloadScore,
     details,
+    missingInputs,
   };
 }
 
@@ -1024,10 +1066,16 @@ export async function scanSinglePort(
     };
   }
 
-  const start = performance.now();
+  // Wall clock for the whole probe chain, reported as `latencyMs`.
+  const overallStart = performance.now();
 
   try {
     const probeWithFetch = async (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
+      // Each probe times itself. Previously all three shared a single `start`
+      // captured before the chain began, so any fallback probe saw the elapsed
+      // time of its predecessor too and could only ever return 'filtered' —
+      // making the entire fallback path dead code.
+      const start = performance.now();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -1041,11 +1089,11 @@ export async function scanSinglePort(
         });
         clearTimeout(timer);
         return 'open';
-      } catch (err: any) {
+      } catch (err: unknown) {
         clearTimeout(timer);
         const elapsed = performance.now() - start;
 
-        if (err.name === 'AbortError' || elapsed >= timeoutMs - 50) {
+        if ((err instanceof Error && err.name === 'AbortError') || elapsed >= timeoutMs - 50) {
           return 'filtered';
         }
 
@@ -1065,6 +1113,7 @@ export async function scanSinglePort(
 
     const probeWithImage = (proto: 'http' | 'https'): Promise<'open' | 'closed' | 'filtered'> => {
       return new Promise((resolve) => {
+        const start = performance.now();
         let resolved = false;
         const img = new Image();
         const timer = setTimeout(() => {
@@ -1100,7 +1149,7 @@ export async function scanSinglePort(
 
         try {
           img.src = `${proto}://${cleanHost}:${port}/favicon.ico?_cb=${Math.random().toString(36).slice(2)}`;
-        } catch (e) {
+        } catch {
           finish('filtered');
         }
       });
@@ -1108,6 +1157,7 @@ export async function scanSinglePort(
 
     const probeWithWs = (): Promise<'open' | 'closed' | 'filtered'> => {
       return new Promise((resolve) => {
+        const start = performance.now();
         let ws: WebSocket | null = null;
         let timer: any = null;
 
@@ -1116,7 +1166,9 @@ export async function scanSinglePort(
           if (ws) {
             try {
               ws.close();
-            } catch (e) {}
+            } catch {
+              /* already closing */
+            }
             ws = null;
           }
           resolve(s);
@@ -1137,7 +1189,7 @@ export async function scanSinglePort(
               finish('filtered');
             }
           };
-        } catch (e) {
+        } catch {
           finish('filtered');
         }
       });
@@ -1157,7 +1209,7 @@ export async function scanSinglePort(
       }
     }
 
-    const latencyMs = Math.round(performance.now() - start);
+    const latencyMs = Math.round(performance.now() - overallStart);
 
     return {
       host: cleanHost,
@@ -1169,8 +1221,8 @@ export async function scanSinglePort(
       isWeb,
       protocol,
     };
-  } catch (err) {
-    const latencyMs = Math.round(performance.now() - start);
+  } catch {
+    const latencyMs = Math.round(performance.now() - overallStart);
     return {
       host: cleanHost,
       port,

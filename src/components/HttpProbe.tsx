@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Server, Play, RefreshCw, CheckCircle2, AlertTriangle, ShieldCheck, Copy } from 'lucide-react';
+import { Server, Play, RefreshCw } from 'lucide-react';
 import { HttpProbeResult, HistoryItem } from '../types';
 import { probeHttpEndpoint } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';

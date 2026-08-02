@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, ExternalLink, X, ShieldCheck, Sparkles, Coffee, Gift, Building2, Code2, ShieldAlert } from 'lucide-react';
+import { Heart, ExternalLink, X, ShieldCheck, Sparkles, Coffee, Gift, Building2, Code2 } from 'lucide-react';
 
 interface DevSupportModalProps {
   isOpen: boolean;

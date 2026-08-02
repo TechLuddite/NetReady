@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { ToolTab, NetworkConnectionInfo, HistoryItem } from './types';
 import { getNetworkConnectionInfo } from './utils/network';
 import { getHistory, getLocalStorageSizeBytes } from './utils/storage';
@@ -17,7 +17,7 @@ import { HttpProbe } from './components/HttpProbe';
 import { WebSocketTester } from './components/WebSocketTester';
 import { HistoryLog } from './components/HistoryLog';
 import { ExportPage } from './components/ExportPage';
-import { ShieldCheck, HardDrive } from 'lucide-react';
+import { HardDrive } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ToolTab>('dashboard');

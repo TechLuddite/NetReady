@@ -34,12 +34,42 @@
   }
 }
 
+/* Used by all three modals. It was referenced before it existed, so modals
+   popped in with no transition at all. */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.18s ease-out;
+}
+
 .animate-pulse-glow {
   animation: pulseGlow 1.8s infinite ease-in-out;
 }
 
 .animate-bounce-right {
   animation: bounceRight 1.2s infinite ease-in-out;
+}
+
+/* Respect the OS "reduce motion" setting. The app is dense with pulses, pings,
+   spinners and map fly-to easing; none of it is load-bearing. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Hide scrollbars for toolbars */

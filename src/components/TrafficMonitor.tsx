@@ -5,15 +5,11 @@ import {
   Pause,
   Play,
   Trash2,
-  RefreshCw,
-  ArrowUpRight,
   Wifi,
   Clock,
   HardDrive,
   Filter,
   Layers,
-  CheckCircle2,
-  Info,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -133,7 +129,7 @@ export const TrafficMonitor: React.FC = () => {
       const currentBatch = [...pendingEntriesRef.current];
       pendingEntriesRef.current = [];
 
-      let requestsCount = currentBatch.length;
+      const requestsCount = currentBatch.length;
       let transferBytes = 0;
       let totalLatency = 0;
       let peakLatencyMs = 0;
