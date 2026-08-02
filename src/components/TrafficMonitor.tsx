@@ -20,6 +20,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
+import { MetricValue } from './MetricValue';
 
 export interface CapturedResource {
   id: string;
@@ -233,12 +234,18 @@ export const TrafficMonitor: React.FC = () => {
   const currentRequestsPerSec = activeSamples.length
     ? Math.round(activeSamples.reduce((acc, s) => acc + s.requestsCount, 0) / activeSamples.length)
     : 0;
-  const currentAvgLatency = activeSamples.length
-    ? Math.round(
-        activeSamples.reduce((acc, s) => acc + s.avgLatencyMs, 0) /
-          (activeSamples.filter((s) => s.requestsCount > 0).length || 1)
-      )
-    : 0;
+  // Only samples that actually contain a request carry a latency. With none, the
+  // answer is "no latency to average", not "0 ms" — the `|| 1` denominator here
+  // used to divide a sum of zeros by one and render a confident 0 ms while the
+  // machine was offline and nothing had been requested at all.
+  const samplesWithRequests = activeSamples.filter((s) => s.requestsCount > 0);
+  const currentAvgLatency: number | null =
+    samplesWithRequests.length > 0
+      ? Math.round(
+          samplesWithRequests.reduce((acc, s) => acc + s.avgLatencyMs, 0) /
+            samplesWithRequests.length,
+        )
+      : null;
   const currentKbps = activeSamples.length
     ? Math.round(activeSamples.reduce((acc, s) => acc + s.throughputKbps, 0) / activeSamples.length)
     : 0;
@@ -353,9 +360,21 @@ export const TrafficMonitor: React.FC = () => {
           </div>
           <div className="mt-1 flex items-baseline space-x-1">
             <span className="text-2xl font-extrabold text-white font-mono">
-              {currentAvgLatency}
+              <MetricValue
+                value={currentAvgLatency}
+                failure={{
+                  metric: 'avgLatencyMs',
+                  reason: 'insufficient-samples',
+                  detail:
+                    'No request completed in the last five seconds, so there is no latency to ' +
+                    'average.',
+                }}
+                unavailableClassName="text-slate-600"
+              />
             </span>
-            <span className="text-xs text-emerald-400 font-mono font-semibold">ms</span>
+            {currentAvgLatency !== null && (
+              <span className="text-xs text-emerald-400 font-mono font-semibold">ms</span>
+            )}
           </div>
           <div className="text-[10px] text-slate-500 mt-1 font-mono">
             Last 5s rolling average

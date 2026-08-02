@@ -26,12 +26,33 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
       'Your public IP when you open the GeoIP tool, and every IP or domain you look up or trace.',
   },
   {
-    host: '1.1.1.1, dns.quad9.net, doh.opendns.com, en.wikipedia.org',
-    receives: 'Your IP, as the targets of latency probes you choose to run.',
+    host: '1.1.1.1, one.one.one.one, dns.quad9.net, doh.opendns.com, en.wikipedia.org',
+    receives:
+      'Your IP, as the targets of latency probes you choose to run. The triage and DNS-hijack ' +
+      'checks call 1.1.1.1 twice — once by name and once by literal address — to test ' +
+      'this network’s resolver.',
+  },
+  {
+    host: 'ipv4.icanhazip.com, ipv6.icanhazip.com, api4.ipify.org, api6.ipify.org',
+    receives:
+      'Your IP, when you run the dual-stack check. Each host answers on one address family only, ' +
+      'and each returns the address it saw you arrive from.',
+  },
+  {
+    host: 'cp.cloudflare.com',
+    receives:
+      'Your IP, during the captive-portal check — but only when NetReady is opened over plain ' +
+      'http. A page served over https cannot make this request at all.',
   },
   {
     host: 'stun.l.google.com (and other STUN servers)',
     receives: 'Your public IP, and potentially local network addresses, during WebRTC analysis.',
+  },
+  {
+    host: 'httpbin.org',
+    receives:
+      'Your IP, only if you press “Trigger Network Spike” on the live traffic monitor, which ' +
+      'makes a handful of requests so the sparklines have something real to draw.',
   },
   {
     host: 'basemaps.cartocdn.com',
@@ -128,7 +149,7 @@ export const PrivacySafetyModal: React.FC<PrivacySafetyModalProps> = ({ isOpen, 
             <div className="bg-white/[0.02] border border-white/5 rounded-xl p-4 space-y-2">
               <div className="flex items-center space-x-2 text-amber-400 font-semibold text-xs uppercase tracking-wider">
                 <Scale className="w-4 h-4" />
-                <span>AGPL-3.0 License</span>
+                <span>MIT License</span>
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
                 Open-source and auditable. Anyone can inspect the full application source code for total safety verification.

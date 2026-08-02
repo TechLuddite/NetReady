@@ -17,6 +17,74 @@ why it was hard to spot; [`CLAUDE.md`](CLAUDE.md) holds the rules that keep it f
 
 ---
 
+## 🧠 The answer layer
+
+Measurements are the easy half. The question people actually arrive with is **"is it me or the
+internet?"**, and a grade does not answer it.
+
+### 🩺 One-button triage
+
+Walks a real decision tree — link → name resolution → interception → address families → four
+unrelated content networks → throughput → behaviour under load — and returns a **verdict with
+ranked probable causes and concrete fixes**, not a letter.
+
+The reasoning is a data-driven rules engine in [`src/analysis/`](src/analysis/). Each rule declares
+the metrics it consumes, a predicate, a verdict, an ordinal confidence and a remediation, and every
+finding carries the measurements that produced it. That makes it **deterministic, instant, offline,
+and auditable** — same evidence in, same answer out, with no model involved and no network request
+needed to reason. `@google/genai` was removed from this project deliberately; nothing here calls an
+API to think.
+
+Two rules govern it, and both are tested:
+
+- **A rule whose inputs were not measured does not fire.** It is skipped, and the gap is reported.
+- **Silence is not a clean bill of health.** Fewer than three conclusive checks yields
+  `indeterminate` — explicitly *not* "your network is fine". A run that measured nothing concludes
+  nothing.
+
+### 🎯 Bottleneck attribution
+
+The dashboard headline now names the *binding constraint* rather than showing four flat bars:
+
+> **Grade B — the binding constraint is bufferbloat, not bandwidth.** Latency rose from 18 ms idle
+> to 80 ms under load, an increase of 62 ms.
+
+It is computed by sensitivity analysis over the existing scoring function: each measured input is
+lifted, one at a time, to a level past which it stops limiting the result, and whichever lift moves
+the score furthest is the constraint. Those comparison values live inside the calculation and are
+never reported as measurements — a test asserts they cannot leak into the output. Severe bufferbloat
+overrides the ranking, because the numeric score does not model it and the user's experience does.
+
+### 🌍 Dual-stack (IPv4 / IPv6) reachability
+
+Calls hostnames that publish **only** an A record and hostnames that publish **only** an AAAA
+record, two independent providers per family, then asks a dual-stack host which address it saw —
+which reveals the family the browser actually prefers.
+
+No IPv6 response is reported as *"no response"*, never as *"IPv6 is disabled"*: a browser cannot
+distinguish an absent IPv6 path from two probe hosts being unreachable, and a family that was never
+probed reads as `not checked` rather than as a failure — including in the CSV export.
+
+### 🛰️ Captive portal & DNS hijack detection
+
+The textbook `generate_204` redirect check needs a plaintext request, and a page served over HTTPS
+may not make one. That limitation is reported (`mixed-content-blocked`) rather than worked around,
+and the probe *does* run when NetReady is opened from a local `http` origin.
+
+Over HTTPS the signature is different, and that is the useful insight: **a captive portal cannot
+rewrite an HTTPS response without breaking the certificate chain, so it blocks instead.** So this
+checks endpoints whose exact response is known in advance and reports which returned their own
+content, which returned something else (interception with a trusted certificate), and which said
+nothing at all while the browser still claimed to be online (the portal signature).
+
+For DNS, it does the one test of the *system* resolver a web page can perform: reach one server two
+ways — by name, which uses the resolver, and by literal IP, which does not. Literal answering while
+the name does not is a broken or redirected resolver. Two DoH providers are also cross-checked, but
+only on anycast names whose correct answer is identical worldwide; ordinary CDN hostnames disagree
+by design and would manufacture findings out of geography.
+
+---
+
 ## 🛠️ Tools
 
 ### 1. ⚡ Speed & Bandwidth
@@ -133,8 +201,11 @@ without touching it, so the following go directly from your browser to third par
 | `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `unpkg.com` | Your IP, as Edge Path Explorer probe targets (a few KB each) |
 | `cloudflare-dns.com`, `dns.google` | Every domain you resolve, over encrypted DoH |
 | `ipwho.is`, `ipapi.co`, `freeipapi.com` | Your public IP on opening the GeoIP tool, and every IP or domain you look up |
-| `1.1.1.1`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets |
+| `1.1.1.1`, `one.one.one.one`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets, and as the two halves of the resolver test |
+| `ipv4.icanhazip.com`, `ipv6.icanhazip.com`, `api4.ipify.org`, `api6.ipify.org` | Your IP, during the dual-stack check — each answers on one address family only |
+| `cp.cloudflare.com` | Your IP, during the captive-portal check, and only when NetReady is opened over plain `http` |
 | `stun.l.google.com` and other STUN servers | Your public IP, and potentially local addresses |
+| `httpbin.org` | Your IP, only when you press "Trigger Network Spike" on the live traffic monitor |
 | `basemaps.cartocdn.com`, `openstreetmap.org` | Map areas you view, revealing an approximate target location |
 | Hosts you enter | Direct connections from your browser — that is what a probe *is* |
 
@@ -150,8 +221,9 @@ devices and hosts you own or have explicit permission to test.
 - `npm run typecheck` — TypeScript in `strict` mode, zero errors.
 - `npm run lint` — ESLint with `react-hooks`, zero errors.
 - `npm run test` — Vitest. Coverage focuses on the pure logic where silent failures hide: CSV
-  generation, CIDR math, OUI decoding, and the rule that a failed measurement can never produce a
-  number.
+  generation, CIDR math, OUI decoding, the rules engine and bottleneck attribution, and the rule
+  that a failed measurement can never produce a number. The single most important assertion in the
+  suite is that an empty snapshot fires no rule at all.
 
 CI runs all three on every push and pull request; deployment is gated on them passing.
 

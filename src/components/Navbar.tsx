@@ -22,6 +22,9 @@ import {
   Compass,
   ChevronRight,
   ChevronLeft,
+  Stethoscope,
+  Network,
+  ShieldQuestion,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo } from '../types';
 import { PrivacySafetyModal } from './PrivacySafetyModal';
@@ -51,7 +54,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }>; badge?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
-    { id: 'edgepath', label: 'Edge Path', icon: Compass, badge: 'NEW' },
+    { id: 'triage', label: 'Me or the Internet?', icon: Stethoscope, badge: 'NEW' },
+    { id: 'dualstack', label: 'IPv4 / IPv6', icon: Network, badge: 'NEW' },
+    { id: 'captive', label: 'Portal & DNS Hijack', icon: ShieldQuestion, badge: 'NEW' },
+    { id: 'edgepath', label: 'Edge Path', icon: Compass },
     { id: 'tracert', label: 'Route Model', icon: GitCommit, badge: 'SIM' },
     { id: 'portscanner', label: 'Port Scanner', icon: Radar, badge: 'BETA' },
     { id: 'geoip', label: 'GeoIP Lookup', icon: Globe },
