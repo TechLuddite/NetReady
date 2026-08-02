@@ -43,6 +43,35 @@ export function calculateGreatCircleDistanceKm(
   return Math.round(R * c);
 }
 
+/**
+ * Raised when no GeoIP provider could resolve a location.
+ *
+ * Callers must handle absence. The alternative — which is what this module used
+ * to do — is to invent a plausible city and plot it on a map.
+ */
+export class GeoLookupUnavailableError extends Error {
+  constructor(public readonly target: string) {
+    super(
+      `No GeoIP provider could resolve a location for ${target}. ` +
+        'The lookup services may be rate-limited, blocked, or unreachable.',
+    );
+    this.name = 'GeoLookupUnavailableError';
+  }
+}
+
+/** RFC 1918 / loopback / link-local — addresses with no global location. */
+export function isPrivateOrLoopback(ip: string): boolean {
+  if (ip === 'localhost') return true;
+  const octets = ip.split('.').map((o) => parseInt(o, 10));
+  if (octets.length !== 4 || octets.some((o) => isNaN(o))) return false;
+  const [a, b] = octets as [number, number, number, number];
+  if (a === 10 || a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true; // full /12, not just 172.16.x
+  if (a === 169 && b === 254) return true; // link-local
+  return false;
+}
+
 // Interface for GeoIP responses
 export interface GeoIpInfo {
   ip: string;
@@ -58,25 +87,13 @@ export interface GeoIpInfo {
 
 // Real GeoIP lookup with robust fallback endpoints
 export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
-  // If IP is private / local loopback, return local defaults
-  if (
-    ip === '127.0.0.1' ||
-    ip === 'localhost' ||
-    ip.startsWith('192.168.') ||
-    ip.startsWith('10.') ||
-    ip.startsWith('172.16.')
-  ) {
-    return {
-      ip,
-      city: 'Local Gateway',
-      region: 'LAN Subnet',
-      country: 'Private Network',
-      countryCode: 'LOC',
-      lat: 37.7749,
-      lng: -122.4194,
-      isp: 'Local LAN Router',
-      asn: 'AS-LOCAL',
-    };
+  // Private and loopback addresses are not globally routable and have no
+  // geolocation at all. This used to return San Francisco's coordinates for
+  // every one of them, which put a user's own LAN gateway on the map in
+  // California. Throwing keeps them off the map entirely, which is correct: a
+  // private address is unlocatable, not located somewhere specific.
+  if (isPrivateOrLoopback(ip)) {
+    throw new GeoLookupUnavailableError(ip);
   }
 
   try {
@@ -86,14 +103,14 @@ export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
       if (data.latitude && data.longitude) {
         return {
           ip,
-          city: data.cityName || 'Edge Node',
-          region: data.regionName || 'Transit Region',
-          country: data.countryName || 'Global',
-          countryCode: data.countryCode || 'US',
+          city: data.cityName || 'Unknown',
+          region: data.regionName || 'Unknown',
+          country: data.countryName || 'Unknown',
+          countryCode: data.countryCode || '',
           lat: parseFloat(data.latitude),
           lng: parseFloat(data.longitude),
-          isp: data.ipVersion ? `IP v${data.ipVersion} Transit` : 'Public IP',
-          asn: data.asn ? `AS${data.asn}` : 'AS-POP',
+          isp: data.ipVersion ? `IPv${data.ipVersion}` : 'Unknown',
+          asn: data.asn ? `AS${data.asn}` : 'Unknown',
         };
       }
     }
@@ -108,14 +125,14 @@ export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
       if (data2.latitude && data2.longitude) {
         return {
           ip,
-          city: data2.city || 'Edge Node',
-          region: data2.region || 'Region',
-          country: data2.country_name || 'Global',
-          countryCode: data2.country_code || 'US',
+          city: data2.city || 'Unknown',
+          region: data2.region || 'Unknown',
+          country: data2.country_name || 'Unknown',
+          countryCode: data2.country_code || '',
           lat: parseFloat(data2.latitude),
           lng: parseFloat(data2.longitude),
-          isp: data2.org || data2.asn || 'Backbone Carrier',
-          asn: data2.asn || 'AS-GLOBAL',
+          isp: data2.org || data2.asn || 'Unknown',
+          asn: data2.asn || 'Unknown',
         };
       }
     }
@@ -123,18 +140,11 @@ export async function fetchGeoIpData(ip: string): Promise<GeoIpInfo> {
     // fallback default
   }
 
-  // Generic fallback if cross-origin API unreachable
-  return {
-    ip,
-    city: 'Transit IXP Node',
-    region: 'Backbone Highway',
-    country: 'United States',
-    countryCode: 'US',
-    lat: 38.8951,
-    lng: -77.0364,
-    isp: 'Tier-1 Telecom Transit',
-    asn: 'AS15169',
-  };
+  // Both providers failed (unreachable, rate-limited, or blocked). There is no
+  // location to report. This used to return hardcoded Washington DC
+  // coordinates labelled "Tier-1 Telecom Transit / AS15169", which were then
+  // plotted on the map as though they had been looked up.
+  throw new GeoLookupUnavailableError(ip);
 }
 
 // Get user's current client IP & Geo location
@@ -145,11 +155,11 @@ export async function getClientGeoLocation(): Promise<GeoIpInfo> {
       const data = await res.json();
       if (data.latitude && data.longitude) {
         return {
-          ip: data.ipAddress || '127.0.0.1',
-          city: data.cityName || 'Client City',
-          region: data.regionName || 'Client State',
-          country: data.countryName || 'United States',
-          countryCode: data.countryCode || 'US',
+          ip: data.ipAddress || 'Unknown',
+          city: data.cityName || 'Unknown',
+          region: data.regionName || 'Unknown',
+          country: data.countryName || 'Unknown',
+          countryCode: data.countryCode || '',
           lat: parseFloat(data.latitude),
           lng: parseFloat(data.longitude),
           isp: 'Client ISP Connection',
@@ -161,17 +171,9 @@ export async function getClientGeoLocation(): Promise<GeoIpInfo> {
     // secondary fallback
   }
 
-  return {
-    ip: '192.168.1.100',
-    city: 'San Francisco',
-    region: 'California',
-    country: 'United States',
-    countryCode: 'US',
-    lat: 37.7749,
-    lng: -122.4194,
-    isp: 'Local Fiber ISP',
-    asn: 'AS7018 AT&T',
-  };
+  // Previously returned a hardcoded San Francisco / 192.168.1.100 / "AS7018
+  // AT&T" identity for every user whose lookup failed.
+  throw new GeoLookupUnavailableError('client');
 }
 
 // Intermediate Tier-1 transit backbones for realistic route interpolation
@@ -263,8 +265,10 @@ export async function executeTraceroute(
     region: clientGeo.region,
     country: clientGeo.country,
     countryCode: clientGeo.countryCode,
-    isp: clientGeo.isp || 'Regional Access ISP',
-    asn: clientGeo.asn || 'AS7018',
+    // 'AS7018' is AT&T. Presenting it as a fallback attributed a real,
+    // identifiable network operator to a hop that was never observed.
+    isp: clientGeo.isp || 'Unknown',
+    asn: clientGeo.asn || 'Unknown',
     nodeType: 'isp_pop',
   };
   hops.push(hop2);

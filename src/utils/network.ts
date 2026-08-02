@@ -949,6 +949,57 @@ export const COMMON_PORTS: PortDefinition[] = [
   { port: 27017, service: 'MongoDB', description: 'MongoDB NoSQL Database', category: 'database' },
 ];
 
+/** Hard cap on expanded scan targets, applied to CIDR blocks, dashed ranges and
+ *  comma lists alike. Surfaced via {@link describeTargetExpansion} so the UI can
+ *  say what was dropped — silently scanning 256 of 65,534 hosts and reporting
+ *  "no open ports" is a misleading result, not a fast one. */
+export const MAX_SCAN_HOSTS = 256;
+
+/** How many addresses a target expression covers, before the cap. */
+export function countTargetHosts(input: string): number {
+  const raw = input.trim();
+  if (!raw) return 1;
+
+  if (raw.includes(',')) {
+    return raw.split(',').reduce((sum, part) => sum + countTargetHosts(part), 0);
+  }
+
+  if (raw.includes('/')) {
+    const [, prefixStr] = raw.split('/');
+    const prefix = parseInt(prefixStr, 10);
+    if (!isNaN(prefix) && prefix >= 16 && prefix <= 32) {
+      const total = Math.pow(2, 32 - prefix);
+      return prefix < 31 ? Math.max(1, total - 2) : total;
+    }
+  }
+
+  if (raw.includes('-')) {
+    const [startStr, endRaw] = raw.split('-');
+    let endStr = (endRaw ?? '').trim();
+    if (endStr && !endStr.includes('.')) {
+      const octets = startStr.trim().split('.');
+      if (octets.length === 4) endStr = `${octets[0]}.${octets[1]}.${octets[2]}.${endStr}`;
+    }
+    const toNum = (ip: string) =>
+      ip.split('.').reduce((acc, o) => (acc << 8) + parseInt(o, 10), 0) >>> 0;
+    const start = toNum(startStr.trim());
+    const end = toNum(endStr);
+    if (start > 0 && end >= start) return end - start + 1;
+  }
+
+  return 1;
+}
+
+/** Null when nothing was dropped; otherwise a sentence naming the shortfall. */
+export function describeTargetExpansion(input: string): string | null {
+  const requested = countTargetHosts(input);
+  if (requested <= MAX_SCAN_HOSTS) return null;
+  return (
+    `${input.trim()} covers ${requested.toLocaleString()} addresses. NetReady scans the first ` +
+    `${MAX_SCAN_HOSTS} only — narrow the range to cover the rest.`
+  );
+}
+
 export function parseTargetHosts(input: string): string[] {
   const raw = input.trim();
   if (!raw) return ['127.0.0.1'];
@@ -959,7 +1010,7 @@ export function parseTargetHosts(input: string): string[] {
     for (const part of raw.split(',')) {
       list.push(...parseTargetHosts(part));
     }
-    return Array.from(new Set(list)).slice(0, 256);
+    return Array.from(new Set(list)).slice(0, MAX_SCAN_HOSTS);
   }
 
   // Handle CIDR subnets e.g. 192.168.1.0/24 or 10.0.0.0/28
@@ -985,7 +1036,7 @@ export function parseTargetHosts(input: string): string[] {
         lastLong = broadcastLong - 1;
       }
 
-      const count = Math.min(256, Math.max(1, lastLong - firstLong + 1));
+      const count = Math.min(MAX_SCAN_HOSTS, Math.max(1, lastLong - firstLong + 1));
       const ips: string[] = [];
       for (let i = 0; i < count; i++) {
         ips.push(numToIp(firstLong + i));
@@ -1015,7 +1066,7 @@ export function parseTargetHosts(input: string): string[] {
     const start = ipToNum(startStr);
     const end = ipToNum(endStr);
     if (start > 0 && end >= start) {
-      const count = Math.min(256, end - start + 1);
+      const count = Math.min(MAX_SCAN_HOSTS, end - start + 1);
       const ips: string[] = [];
       for (let i = 0; i < count; i++) {
         ips.push(numToIp(start + i));

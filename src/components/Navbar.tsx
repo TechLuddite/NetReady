@@ -184,7 +184,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
 
               {/* Downlink Speed Badge */}
-              {connInfo.downlink && (
+              {connInfo.downlink !== undefined && connInfo.downlink > 0 && (
                 <div className="hidden xl:flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-mono bg-white/5 border border-white/10 text-slate-300">
                   <span className="text-slate-400">Est. Downlink:</span>
                   <span className="font-semibold text-cyan-400">{connInfo.downlink} Mbps</span>

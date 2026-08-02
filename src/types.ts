@@ -164,7 +164,11 @@ export interface MacLookupResult {
   vendor: string;
   addressType: 'Unicast' | 'Multicast';
   administration: 'Globally Unique (U/L = 0)' | 'Locally Administered (U/L = 1)';
+  /** True only when the OUI is present in the offline IEEE database. */
   isKnown: boolean;
+  /** True when fewer than 12 hex digits were supplied, so only the vendor
+   *  prefix is known and the device half of the address is not. */
+  isPartial?: boolean;
 }
 
 export interface HttpProbeResult {

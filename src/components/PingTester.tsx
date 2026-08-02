@@ -150,7 +150,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             </h1>
           </div>
           <p className="text-xs text-slate-400 max-w-xl">
-            Measures round-trip response time, latency jitter variance, and packet loss using microsecond-precision HTTP HEAD probes.
+            Measures round-trip time, jitter and packet loss using HTTP HEAD probes. This is application-layer timing, not ICMP — it includes TLS and server handling, so it reads slightly higher than a system ping.
           </p>
         </div>
 

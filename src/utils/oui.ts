@@ -116,11 +116,14 @@ export function parseAndLookupMac(input: string): MacLookupResult {
     };
   }
 
-  // Format as XX:XX:XX:XX:XX:XX
-  const padded = rawClean.padEnd(12, '0').slice(0, 12);
-  const formattedMac = padded.match(/.{1,2}/g)?.join(':') || input;
+  // A 6-character input identifies an OUI, not a device. Padding it out to 12
+  // and rendering `AA:BB:CC:00:00:00` invents the device half of an address the
+  // user never supplied, so partial input is formatted as the prefix it is.
+  const isPartial = rawClean.length < 12;
+  const truncated = rawClean.slice(0, 12);
+  const formattedMac = truncated.match(/.{1,2}/g)?.join(':') || input;
 
-  const ouiHex = padded.slice(0, 6);
+  const ouiHex = truncated.slice(0, 6);
   const ouiFormatted = `${ouiHex.slice(0, 2)}:${ouiHex.slice(2, 4)}:${ouiHex.slice(4, 6)}`;
 
   // Determine Unicast vs Multicast (1st byte's LSB)
@@ -134,25 +137,30 @@ export function parseAndLookupMac(input: string): MacLookupResult {
     ? 'Locally Administered (U/L = 1)'
     : 'Globally Unique (U/L = 0)';
 
-  let vendor = OUI_DATABASE[ouiFormatted];
-  let isKnown = true;
+  // `isKnown` means "this OUI is in the offline database". A randomised or
+  // locally-administered address has no registered vendor by definition, so it
+  // is not known either — it previously reported `isKnown: true` next to a
+  // placeholder vendor string.
+  const registeredVendor = OUI_DATABASE[ouiFormatted];
+  const isKnown = Boolean(registeredVendor);
 
-  if (!vendor) {
-    if (isLocallyAdministered) {
-      vendor = 'Locally Administered Device (Randomized / Virtual MAC)';
-    } else {
-      vendor = 'Unknown Vendor (OUI not in offline database)';
-      isKnown = false;
-    }
+  let vendor: string;
+  if (registeredVendor) {
+    vendor = registeredVendor;
+  } else if (isLocallyAdministered) {
+    vendor = 'Locally administered (randomised or virtual MAC — no registered vendor)';
+  } else {
+    vendor = 'Unknown vendor (OUI not in the offline database)';
   }
 
   return {
     mac: formattedMac,
-    cleanMac: padded,
+    cleanMac: truncated,
     oui: ouiFormatted,
     vendor,
     addressType,
     administration,
     isKnown,
+    isPartial,
   };
 }

@@ -311,12 +311,25 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
 
           <div className="my-3 text-center">
             <div className="flex items-center justify-center space-x-2">
-              <span className={`text-2xl font-extrabold font-mono border px-3 py-0.5 rounded-lg ${getBufferbloatColor(result?.bufferbloatScore)}`}>
-                {result?.bufferbloatScore || 'A+'}
+              {/* An ungraded test rendered a passing 'A+' here, so a run that
+                  never measured loaded latency looked like a perfect result. */}
+              <span
+                className={`text-2xl font-extrabold font-mono border px-3 py-0.5 rounded-lg ${
+                  result?.bufferbloatScore
+                    ? getBufferbloatColor(result.bufferbloatScore)
+                    : 'text-slate-600 bg-slate-800/50 border-slate-700/50'
+                }`}
+                title={
+                  result?.bufferbloatScore
+                    ? undefined
+                    : 'Needs both an idle and an under-load latency sample.'
+                }
+              >
+                {result?.bufferbloatScore ?? '—'}
               </span>
             </div>
             <div className="text-[11px] text-slate-400 mt-1 font-mono">
-              Loaded Ping: {result?.loadedPing ? `${result.loadedPing} ms` : '--'}
+              Loaded ping: {displayMetric(result?.loadedPing ?? null, 'ms')}
             </div>
           </div>
 

@@ -14,7 +14,7 @@ import {
   Activity,
 } from 'lucide-react';
 import { PortScanResult, PortStatus, HistoryItem } from '../types';
-import { scanPortList, gatherWebRtcCandidates } from '../utils/network';
+import { scanPortList, gatherWebRtcCandidates, describeTargetExpansion } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 
@@ -66,6 +66,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
   const [searchTerm, setSearchTerm] = useState('');
   const [detectingSubnet, setDetectingSubnet] = useState(false);
   const [detectedSubnetInfo, setDetectedSubnetInfo] = useState<string | null>(null);
+  const truncationWarning = useMemo(() => describeTargetExpansion(targetHost), [targetHost]);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
 
   // Helper to parse comma separated ports or ranges e.g. "80, 443, 3000-3010"
@@ -107,19 +108,32 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     setDetectedSubnetInfo(null);
     try {
       const rtc = await gatherWebRtcCandidates();
-      const localIp = rtc.localIps[0] || '192.168.1.50';
-      const ipParts = localIp.split('.');
-      if (ipParts.length === 4) {
-        const subnet = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.0/24`;
-        const gateway = `${ipParts[0]}.${ipParts[1]}.${ipParts[2]}.1`;
+
+      // Only an actual dotted-quad counts as a detection. Chrome and Firefox
+      // now return mDNS candidates like `a1b2c3d4-....local` instead of the
+      // real LAN address, so this usually finds nothing — and when it does, the
+      // honest answer is to say so rather than to fall back to a hardcoded
+      // `192.168.1.50` and label it "Detected Interface".
+      const ipv4 = rtc.localIps.find((ip) => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip));
+
+      if (ipv4) {
+        const [a, b, c] = ipv4.split('.');
+        const subnet = `${a}.${b}.${c}.0/24`;
         setTargetHost(subnet);
-        setDetectedSubnetInfo(`Detected Interface: ${localIp} (Set Subnet Target: ${subnet}, Gateway: ${gateway})`);
+        setDetectedSubnetInfo(
+          `Detected interface ${ipv4} — target set to ${subnet} (gateway is usually ${a}.${b}.${c}.1).`,
+        );
       } else {
-        setTargetHost('127.0.0.1');
-        setDetectedSubnetInfo('Local interface fallback: 127.0.0.1 (Loopback)');
+        // Deliberately leaves the user's target untouched.
+        setDetectedSubnetInfo(
+          'Your browser withholds the local IP address (mDNS candidate obfuscation), so the ' +
+            'subnet could not be detected. Enter it manually — for example 192.168.1.0/24.',
+        );
       }
     } catch {
-      setDetectedSubnetInfo('Local interface fallback: 127.0.0.1');
+      setDetectedSubnetInfo(
+        'WebRTC candidate gathering failed, so the local subnet could not be detected. Enter it manually.',
+      );
     } finally {
       setDetectingSubnet(false);
     }
@@ -378,8 +392,24 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
           </div>
 
           {detectedSubnetInfo && (
-            <div className="p-3 bg-cyan-950/30 border border-cyan-500/20 rounded-xl text-xs font-mono text-cyan-300">
+            <div
+              role="status"
+              className="p-3 bg-cyan-950/30 border border-cyan-500/20 rounded-xl text-xs font-mono text-cyan-300"
+            >
               {detectedSubnetInfo}
+            </div>
+          )}
+
+          {/* A /16 expands to 65,534 addresses but only the first 256 are
+              scanned. Saying nothing turned that into a misleading "no open
+              ports found" over a range that was never probed. */}
+          {truncationWarning && (
+            <div
+              role="status"
+              className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-400" />
+              <span>{truncationWarning}</span>
             </div>
           )}
 
