@@ -10,6 +10,11 @@ Its distinguishing rule: **NetReady never invents a number.** When a measurement
 `—` and tells you why. Most speed tests will happily hand you a plausible figure derived from
 nothing; this one won't.
 
+That rule exists for a reason. An earlier generated version of this app fabricated results
+whenever a measurement failed — convincingly enough that an offline machine still produced a full
+report card and an A grade. [`docs/POSTMORTEM.md`](docs/POSTMORTEM.md) records what was wrong and
+why it was hard to spot; [`CLAUDE.md`](CLAUDE.md) holds the rules that keep it from coming back.
+
 ---
 
 ## 🛠️ Tools
@@ -165,4 +170,8 @@ the [IEEE OUI registry](https://standards.ieee.org/products-programs/regauth/oui
 
 ## 🛡️ License
 
-GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Use it, fork it, ship it commercially; just keep the
+copyright notice.
+
+All runtime dependencies are permissively licensed (MIT, BSD-2-Clause, ISC), so nothing
+here imposes copyleft obligations downstream.
