@@ -90,6 +90,27 @@ thing this tool has that mainstream speed tests do not.
 
 ---
 
+## The answer layer (`src/analysis/`)
+
+The rules engine turns measurements into findings. It is the one place where the project draws
+conclusions rather than reporting numbers, so it has its own version of the rule above:
+
+> **No measurement, no finding.** A rule whose declared inputs are absent returns `null`. It is
+> skipped and the gap is reported — it never evaluates against a substitute.
+
+- Keep rules **pure and total**: `(snapshot) => RuleHit | null`, no shared state, no ordering
+  dependency, no clock, no network. `evaluateRules` on an empty snapshot must return `[]`, and there
+  is a test that says so. That test is the engine's equivalent of the offline regression run.
+- **Confidence is ordinal, never a percentage.** `confirmed` / `likely` / `possible` each have a
+  stated meaning. "83% confident" would be an invented number with no calculation behind it.
+- **"Checked and found nothing" ≠ "did not check".** `no-fault-found` requires
+  `MIN_CHECKS_FOR_ALL_CLEAR` conclusive checks; below that the verdict is `indeterminate`, which
+  declines in both directions. Silence must never read as a clean bill of health.
+- Every threshold lives in `THRESHOLDS` with a comment justifying it. They are judgements about
+  human experience, not measurements, and they change what the tool tells people.
+- `attributeBottleneck` does substitute values — into a hypothetical re-score, never into a report.
+  A test asserts no reference value can reach the output. Keep it that way.
+
 ## Conventions
 
 - Comments explain *why*, especially where the non-obvious choice is deliberate. Several

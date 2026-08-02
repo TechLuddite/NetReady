@@ -23,6 +23,9 @@ import {
   Calculator,
   Search as SearchIcon,
   HardDrive,
+  Stethoscope,
+  Network,
+  ShieldQuestion,
 } from 'lucide-react';
 import { HistoryItem } from '../types';
 import {
@@ -83,6 +86,12 @@ export const ExportPage: React.FC<ExportPageProps> = ({ onHistoryUpdate }) => {
         return <Calculator className={`${className} text-indigo-400`} />;
       case 'mac':
         return <SearchIcon className={`${className} text-teal-400`} />;
+      case 'triage':
+        return <Stethoscope className={`${className} text-cyan-400`} />;
+      case 'dualstack':
+        return <Network className={`${className} text-indigo-400`} />;
+      case 'captive':
+        return <ShieldQuestion className={`${className} text-amber-400`} />;
       default:
         return <FileSpreadsheet className={`${className} text-slate-400`} />;
     }

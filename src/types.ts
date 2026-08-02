@@ -1,5 +1,8 @@
 export type ToolTab =
   | 'dashboard'
+  | 'triage'
+  | 'dualstack'
+  | 'captive'
   | 'edgepath'
   | 'tracert'
   | 'portscanner'
@@ -45,6 +48,13 @@ export type FailureReason =
   | 'unsupported-api'
   | 'insufficient-samples'
   | 'aborted'
+  /** A page served over https: may not open a plaintext http: connection. Some
+   *  checks — the classic captive-portal `generate_204` probe, anything aimed at
+   *  a LAN device with no certificate — are therefore impossible from the
+   *  deployed build and possible only from a local http: origin. That is a
+   *  browser rule, not a network result, and is reported as its own reason so it
+   *  is never confused with "the target did not answer". */
+  | 'mixed-content-blocked'
   | 'not-attempted';
 
 export interface MeasurementFailure {
@@ -407,6 +417,155 @@ export interface EdgePathResult {
   failures: MeasurementFailure[];
 }
 
+// ---------------------------------------------------------------------------
+// Dual-stack reachability
+//
+// A browser cannot enumerate the interfaces it has, or ask which address family
+// a connection used. What it can do is connect to hostnames that publish only an
+// A record or only an AAAA record, and see which ones answer. That is a direct
+// observation of whether traffic in each family leaves this machine and comes
+// back — nothing is inferred from `navigator.connection` or from the shape of an
+// address the page never received.
+// ---------------------------------------------------------------------------
+
+export type AddressFamily = 'ipv4' | 'ipv6';
+
+/** One family-pinned endpoint and what happened when the browser called it. */
+export interface FamilyProbe {
+  family: AddressFamily;
+  /** Hostname published with only A records (ipv4) or only AAAA records (ipv6). */
+  host: string;
+  url: string;
+  /**
+   * `answered` means a response came back, which proves the family works
+   * end-to-end. `no-response` means it did not, which is *not* the same as
+   * proving the family is unavailable — the probe host could itself be down.
+   * The distinction is preserved all the way to the UI copy.
+   */
+  outcome: 'answered' | 'no-response';
+  /** Round-trip in ms; null when nothing came back. */
+  roundTripMs: number | null;
+  /** Address the endpoint reported seeing, when it is readable cross-origin. */
+  observedIp: string | null;
+  error: string | null;
+}
+
+export interface DualStackResult {
+  id: string;
+  timestamp: number;
+  probes: FamilyProbe[];
+  /** True when at least one endpoint in that family answered, false when every
+   *  one of them was tried and none did, null when none was tried at all. A
+   *  family that was never probed is not a family that failed. */
+  ipv4Reachable: boolean | null;
+  ipv6Reachable: boolean | null;
+  /**
+   * Which family the browser actually chose for a dual-stack host, read from
+   * the address that host reported seeing. Null when no dual-stack host
+   * answered, or when its answer was not readable.
+   */
+  preferredFamily: AddressFamily | null;
+  preferredFamilySource: string | null;
+  verdict:
+    | 'dual-stack'
+    | 'ipv4-only'
+    | 'ipv6-only'
+    | 'neither-family-answered'
+    | null;
+  explanation: string;
+  totalTimeMs: number;
+  failures: MeasurementFailure[];
+}
+
+// ---------------------------------------------------------------------------
+// Captive portal and DNS integrity
+//
+// From an https: page a captive portal cannot rewrite a response without
+// breaking TLS, so its signature is not a redirect the page can read — it is
+// that secure connections stop completing while the browser still believes it is
+// online. These checks look for exactly that, and for the one form of DNS
+// tampering a browser genuinely can observe: a hostname failing while the same
+// server's literal IP still answers.
+// ---------------------------------------------------------------------------
+
+/** A request whose correct response is known in advance, so a wrong one is
+ *  evidence of interception rather than of a slow network. */
+export interface IntegrityProbe {
+  label: string;
+  url: string;
+  /** What a correct response looks like, in one phrase, for the UI. */
+  expectation: string;
+  outcome:
+    /** Reached the endpoint and the response was exactly as expected. */
+    | 'verified'
+    /** Reached something, but it did not return what this endpoint returns. */
+    | 'content-mismatch'
+    /** Nothing came back at all. */
+    | 'no-response'
+    /** Could not be attempted from this origin — see `note`. */
+    | 'not-attempted';
+  roundTripMs: number | null;
+  note: string | null;
+}
+
+export interface CaptivePortalResult {
+  id: string;
+  timestamp: number;
+  /** `location.protocol` at the time of the run. The plaintext generate_204
+   *  probe is only available from an http: origin. */
+  pageProtocol: string;
+  probes: IntegrityProbe[];
+  verdict:
+    /** Every endpoint returned exactly its own content. */
+    | 'no-interception-detected'
+    /** Something answered in place of a known endpoint. */
+    | 'content-substituted'
+    /** Browser says online, yet no HTTPS endpoint completed. */
+    | 'https-blocked'
+    /** Some answered and some did not — not a clean signature either way. */
+    | 'mixed'
+    | null;
+  explanation: string;
+  totalTimeMs: number;
+  failures: MeasurementFailure[];
+}
+
+/** One name resolved through two independent DNS-over-HTTPS providers. */
+export interface DohComparison {
+  name: string;
+  /** Sorted record data from each provider, or null when the query failed. */
+  cloudflare: string[] | null;
+  google: string[] | null;
+  /** Null when either side is missing — absence is not disagreement. */
+  agrees: boolean | null;
+}
+
+export interface DnsIntegrityResult {
+  id: string;
+  timestamp: number;
+  /**
+   * Reaching a host by name exercises the system resolver. Reaching the same
+   * server by literal IP does not. Comparing the two outcomes is the only way a
+   * web page can test the resolver it is not allowed to read.
+   */
+  hostnameReachable: boolean | null;
+  literalIpReachable: boolean | null;
+  hostnameProbed: string;
+  literalProbed: string;
+  comparisons: DohComparison[];
+  verdict:
+    | 'resolver-working'
+    /** Names fail while the same server answers on its literal IP. */
+    | 'resolver-failing'
+    /** Providers returned different addresses for a name that is the same
+     *  everywhere. */
+    | 'answers-diverge'
+    | null;
+  explanation: string;
+  totalTimeMs: number;
+  failures: MeasurementFailure[];
+}
+
 export interface HistoryItem {
   id: string;
   type:
@@ -421,7 +580,10 @@ export interface HistoryItem {
     | 'portscanner'
     | 'tracert'
     | 'geoip'
-    | 'edgepath';
+    | 'edgepath'
+    | 'triage'
+    | 'dualstack'
+    | 'captive';
   timestamp: number;
   title: string;
   summary: string;

@@ -18,6 +18,9 @@ import {
   GitCommit,
   Archive,
   Compass,
+  Stethoscope,
+  Network,
+  ShieldQuestion,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo, SpeedTestResult, PingResult, HistoryItem } from '../types';
 import {
@@ -28,6 +31,7 @@ import {
   createId,
 } from '../utils/network';
 import { displayMetric } from './MetricValue';
+import { BottleneckSummary } from './BottleneckSummary';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 import { TrafficMonitor } from './TrafficMonitor';
@@ -228,12 +232,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
+          {/* Bottleneck attribution.
+              This is the headline now. Four flat bars showed which categories
+              scored low without ever saying which measured input was dragging
+              them down, so the one question a user actually has — "what do I
+              change?" — went unanswered. The bars are still below, demoted to
+              supporting detail. */}
+          <div className="mt-6 pt-4 border-t border-slate-800">
+            <BottleneckSummary score={netReadyScore} speed={latestSpeed} ping={latestPing} />
+          </div>
+
           {/* Application category suitability */}
-          <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-slate-800">
-            <ScoreBar label="Gaming" score={netReadyScore?.gamingScore ?? null} />
-            <ScoreBar label="4K Video" score={netReadyScore?.streamingScore ?? null} />
-            <ScoreBar label="VoIP / Calls" score={netReadyScore?.voipScore ?? null} />
-            <ScoreBar label="Large Files" score={netReadyScore?.downloadScore ?? null} />
+          <div className="mt-4">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-500 mb-2">
+              Category suitability
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <ScoreBar label="Gaming" score={netReadyScore?.gamingScore ?? null} />
+              <ScoreBar label="4K Video" score={netReadyScore?.streamingScore ?? null} />
+              <ScoreBar label="VoIP / Calls" score={netReadyScore?.voipScore ?? null} />
+              <ScoreBar label="Large Files" score={netReadyScore?.downloadScore ?? null} />
+            </div>
           </div>
 
           {auditError && (
@@ -357,6 +376,84 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Triage — the answer layer */}
+          <div
+            onClick={() => setActiveTab('triage')}
+            className="group bg-gradient-to-br from-cyan-950/50 via-slate-900 to-slate-900 border border-cyan-500/40 hover:border-cyan-400 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-xl hover:shadow-cyan-500/10 hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-cyan-500 text-black flex items-center justify-center mb-3 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
+              <Stethoscope className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-white group-hover:text-cyan-400 transition-colors">
+                Is it me or the internet?
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
+                New
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 line-clamp-2">
+              One run walks the whole decision tree and returns a verdict with ranked causes and
+              fixes — deterministic rules, no model, every finding backed by its measurements.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-cyan-400 group-hover:translate-x-1 transition-transform">
+              <span>Run triage</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
+          {/* Dual-stack */}
+          <div
+            onClick={() => setActiveTab('dualstack')}
+            className="group bg-slate-900 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-3 group-hover:bg-indigo-500 group-hover:text-slate-950 transition-colors">
+              <Network className="w-5 h-5" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-300 transition-colors">
+                IPv4 / IPv6 Reachability
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
+                New
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 line-clamp-2">
+              Call hosts that publish only an A record and only an AAAA record, and see which
+              family actually carries traffic from here.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-indigo-300 group-hover:translate-x-1 transition-transform">
+              <span>Check both families</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
+          {/* Captive portal & DNS hijack */}
+          <div
+            onClick={() => setActiveTab('captive')}
+            className="group bg-slate-900 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center mb-3 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors">
+              <ShieldQuestion className="w-5 h-5" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-slate-100 group-hover:text-amber-300 transition-colors">
+                Portal &amp; DNS Hijack
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
+                New
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 line-clamp-2">
+              Endpoints whose exact response is known, checked for substitution — plus whether a
+              server reachable by literal IP is also reachable by name.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-amber-300 group-hover:translate-x-1 transition-transform">
+              <span>Check for interception</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
           {/* Traceroute TRACERT Hop Map */}
           <div
             onClick={() => setActiveTab('edgepath')}

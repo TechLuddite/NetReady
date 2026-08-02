@@ -7,9 +7,16 @@ import type {
   DnsQueryResult,
   GeoIpResult,
   EdgePathResult,
+  DualStackResult,
+  CaptivePortalResult,
+  DnsIntegrityResult,
 } from '../types';
+import type { TriageVerdict } from '../analysis/types';
 
 export const TEST_TYPES = [
+  { id: 'triage', label: 'Network Triage Verdicts', filename: 'triage_results.csv', icon: 'Stethoscope' },
+  { id: 'dualstack', label: 'IPv4 / IPv6 Reachability', filename: 'dualstack_results.csv', icon: 'Network' },
+  { id: 'captive', label: 'Portal & DNS Hijack Checks', filename: 'captive_results.csv', icon: 'ShieldQuestion' },
   { id: 'tracert', label: 'Traceroute (TRACERT)', filename: 'tracert_results.csv', icon: 'GitCommit' },
   { id: 'speedtest', label: 'Speed Test Results', filename: 'speedtest_results.csv', icon: 'Gauge' },
   { id: 'ping', label: 'Ping & Latency Tests', filename: 'ping_results.csv', icon: 'Radio' },
@@ -497,6 +504,239 @@ export function generateEdgePathCsv(items: HistoryItem[]): string {
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
 }
 
+/**
+ * Triage CSV — one row per ranked finding.
+ *
+ * A run that found nothing still exports one row carrying the verdict, because
+ * "checked and found nothing" and "never ran" have to stay distinguishable in a
+ * spreadsheet too. The Attribution column says which of those it was:
+ * `no-fault-found` versus `indeterminate`.
+ */
+export function generateTriageCsv(items: HistoryItem[]): string {
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Attribution',
+    'Headline',
+    'Checks Passed',
+    'Checks Total',
+    'Run Time (ms)',
+    'Finding Rank',
+    'Rule ID',
+    'Finding',
+    'Layer',
+    'Confidence',
+    'Severity',
+    'Verdict',
+    'Remediation',
+    'Evidence',
+    'Not Measured',
+  ];
+
+  const rows: string[][] = [];
+
+  items
+    .filter((i) => i.type === 'triage')
+    .forEach((item) => {
+      const d = (item.data ?? {}) as Partial<TriageVerdict>;
+      const steps = d.steps ?? [];
+      const notMeasured = (d.failures ?? []).map((f) => `${f.metric}: ${f.detail}`).join(' | ');
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(new Date(item.timestamp).toLocaleString()),
+        escapeCsv(d.attribution ?? ''),
+        escapeCsv(d.headline ?? item.title),
+        escapeCsv(steps.filter((s) => s.status === 'pass').length),
+        escapeCsv(steps.length),
+        escapeCsv(d.totalTimeMs ?? ''),
+      ];
+
+      const findings = d.findings ?? [];
+      if (findings.length === 0) {
+        rows.push([
+          ...shared,
+          ...Array(8).fill(escapeCsv('')),
+          escapeCsv(notMeasured),
+        ]);
+        return;
+      }
+
+      findings.forEach((f, index) => {
+        rows.push([
+          ...shared,
+          escapeCsv(index + 1),
+          escapeCsv(f.ruleId),
+          escapeCsv(f.title),
+          escapeCsv(f.layer),
+          escapeCsv(f.confidence),
+          escapeCsv(f.severity),
+          escapeCsv(f.verdict),
+          escapeCsv(f.remediation.join(' | ')),
+          escapeCsv(f.evidence.map((e) => `${e.metric}: ${e.observation}`).join(' | ')),
+          escapeCsv(notMeasured),
+        ]);
+      });
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
+/**
+ * Dual-stack CSV — one row per family-pinned probe.
+ *
+ * The reachability columns carry `answered` / `no response` / `not checked`
+ * rather than TRUE/FALSE, because a family that was never probed must not read
+ * as a family that failed.
+ */
+export function generateDualStackCsv(items: HistoryItem[]): string {
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Verdict',
+    'IPv4',
+    'IPv6',
+    'Preferred Family',
+    'Preference Source',
+    'Probe Host',
+    'Probe Family',
+    'Probe Outcome',
+    'Round Trip (ms)',
+    'Address Seen',
+    'Probe Note',
+    'Not Measured',
+  ];
+
+  const word = (v: boolean | null | undefined): string => {
+    if (v === null || v === undefined) return 'not checked';
+    return v ? 'answered' : 'no response';
+  };
+
+  const rows: string[][] = [];
+
+  items
+    .filter((i) => i.type === 'dualstack')
+    .forEach((item) => {
+      const d = (item.data ?? {}) as Partial<DualStackResult>;
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(new Date(item.timestamp).toLocaleString()),
+        escapeCsv(d.verdict ?? ''),
+        escapeCsv(word(d.ipv4Reachable)),
+        escapeCsv(word(d.ipv6Reachable)),
+        escapeCsv(d.preferredFamily ?? ''),
+        escapeCsv(d.preferredFamilySource ?? ''),
+      ];
+      const notMeasured = escapeCsv(
+        (d.failures ?? []).map((f) => `${f.metric}: ${f.detail}`).join(' | '),
+      );
+
+      const probes = d.probes ?? [];
+      if (probes.length === 0) {
+        rows.push([...shared, ...Array(6).fill(escapeCsv('')), notMeasured]);
+        return;
+      }
+
+      probes.forEach((p) => {
+        rows.push([
+          ...shared,
+          escapeCsv(p.host),
+          escapeCsv(p.family),
+          escapeCsv(p.outcome),
+          escapeCsv(p.roundTripMs ?? ''),
+          escapeCsv(p.observedIp ?? ''),
+          escapeCsv(p.error ?? ''),
+          notMeasured,
+        ]);
+      });
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
+/**
+ * Captive-portal / DNS-hijack CSV — one row per integrity probe.
+ *
+ * The stored record holds both halves of the check, so the DNS verdict is
+ * repeated on every row alongside the probe that row describes.
+ */
+export function generateCaptivePortalCsv(items: HistoryItem[]): string {
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Page Protocol',
+    'Interception Verdict',
+    'DNS Verdict',
+    'Reached By Name',
+    'Reached By Literal IP',
+    'Probe',
+    'Probe URL',
+    'Expected',
+    'Outcome',
+    'Round Trip (ms)',
+    'Probe Note',
+    'Not Measured',
+  ];
+
+  const word = (v: boolean | null | undefined): string => {
+    if (v === null || v === undefined) return 'not checked';
+    return v ? 'answered' : 'no response';
+  };
+
+  const rows: string[][] = [];
+
+  items
+    .filter((i) => i.type === 'captive')
+    .forEach((item) => {
+      const d = (item.data ?? {}) as {
+        portal?: Partial<CaptivePortalResult>;
+        dns?: Partial<DnsIntegrityResult>;
+      };
+      const portal = d.portal ?? {};
+      const dns = d.dns ?? {};
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(new Date(item.timestamp).toLocaleString()),
+        escapeCsv(portal.pageProtocol ?? ''),
+        escapeCsv(portal.verdict ?? ''),
+        escapeCsv(dns.verdict ?? ''),
+        escapeCsv(word(dns.hostnameReachable)),
+        escapeCsv(word(dns.literalIpReachable)),
+      ];
+      const notMeasured = escapeCsv(
+        [...(portal.failures ?? []), ...(dns.failures ?? [])]
+          .map((f) => `${f.metric}: ${f.detail}`)
+          .join(' | '),
+      );
+
+      const probes = portal.probes ?? [];
+      if (probes.length === 0) {
+        rows.push([...shared, ...Array(6).fill(escapeCsv('')), notMeasured]);
+        return;
+      }
+
+      probes.forEach((p) => {
+        rows.push([
+          ...shared,
+          escapeCsv(p.label),
+          escapeCsv(p.url),
+          escapeCsv(p.expectation),
+          escapeCsv(p.outcome),
+          escapeCsv(p.roundTripMs ?? ''),
+          escapeCsv(p.note ?? ''),
+          notMeasured,
+        ]);
+      });
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
 // Generate Generic CSV for other test types
 export function generateGenericCsv(items: HistoryItem[], type: string): string {
   const filtered = items.filter((i) => i.type === type);
@@ -532,6 +772,12 @@ export function getCsvForType(items: HistoryItem[], type: string): string {
       return generateGeoIpCsv(items);
     case 'edgepath':
       return generateEdgePathCsv(items);
+    case 'triage':
+      return generateTriageCsv(items);
+    case 'dualstack':
+      return generateDualStackCsv(items);
+    case 'captive':
+      return generateCaptivePortalCsv(items);
     default:
       return generateGenericCsv(items, type);
   }
