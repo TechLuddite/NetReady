@@ -12,6 +12,11 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
     receives: 'Your IP, plus tens of MB of transfer, whenever you run a speed test or full audit.',
   },
   {
+    host: 'cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com',
+    receives:
+      'Your IP, as the targets of the Edge Path Explorer\u2019s connection-timing probes. A few KB each.',
+  },
+  {
     host: 'cloudflare-dns.com / dns.google',
     receives: 'Every domain name you resolve, over encrypted DNS-over-HTTPS.',
   },

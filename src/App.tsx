@@ -4,6 +4,7 @@ import { getNetworkConnectionInfo } from './utils/network';
 import { getHistory, getLocalStorageSizeBytes } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
+import { EdgePathExplorer } from './components/EdgePathExplorer';
 import { TracertVisualizer } from './components/TracertVisualizer';
 import { PortScanner } from './components/PortScanner';
 import { GeoIpLookup } from './components/GeoIpLookup';
@@ -77,6 +78,10 @@ export default function App() {
             history={history}
             onHistoryUpdate={refreshHistory}
           />
+        )}
+
+        {activeTab === 'edgepath' && (
+          <EdgePathExplorer onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'tracert' && (

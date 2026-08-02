@@ -51,9 +51,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }>; badge?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
-    { id: 'tracert', label: 'Tracert Hop Map', icon: GitCommit },
+    { id: 'edgepath', label: 'Edge Path', icon: Compass, badge: 'NEW' },
+    { id: 'tracert', label: 'Route Model', icon: GitCommit, badge: 'SIM' },
     { id: 'portscanner', label: 'Port Scanner', icon: Radar, badge: 'BETA' },
-    { id: 'geoip', label: 'GeoIP Lookup', icon: Compass },
+    { id: 'geoip', label: 'GeoIP Lookup', icon: Globe },
     { id: 'speedtest', label: 'Speed Test', icon: Gauge },
     { id: 'ping', label: 'Ping & Jitter', icon: Radio },
     { id: 'dns', label: 'DoH DNS', icon: Globe },

@@ -6,6 +6,7 @@ import type {
   PortScanResult,
   DnsQueryResult,
   GeoIpResult,
+  EdgePathResult,
 } from '../types';
 
 export const TEST_TYPES = [
@@ -13,7 +14,8 @@ export const TEST_TYPES = [
   { id: 'speedtest', label: 'Speed Test Results', filename: 'speedtest_results.csv', icon: 'Gauge' },
   { id: 'ping', label: 'Ping & Latency Tests', filename: 'ping_results.csv', icon: 'Radio' },
   { id: 'portscanner', label: 'Port Scanner Results', filename: 'portscanner_results.csv', icon: 'Radar' },
-  { id: 'geoip', label: 'GeoIP Lookups', filename: 'geoip_results.csv', icon: 'Compass' },
+  { id: 'edgepath', label: 'Edge Path Explorations', filename: 'edgepath_results.csv', icon: 'Compass' },
+  { id: 'geoip', label: 'GeoIP Lookups', filename: 'geoip_results.csv', icon: 'Globe' },
   { id: 'dns', label: 'DNS Queries', filename: 'dns_results.csv', icon: 'Globe' },
   { id: 'webrtc', label: 'WebRTC & ICE Analysis', filename: 'webrtc_results.csv', icon: 'ShieldCheck' },
   { id: 'httpprobe', label: 'HTTP Probes', filename: 'httpprobe_results.csv', icon: 'Zap' },
@@ -417,6 +419,84 @@ export function generateGeoIpCsv(items: HistoryItem[]): string {
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
 }
 
+/**
+ * Edge path CSV — one row per probed origin.
+ *
+ * Phase columns are blank when the browser could not observe them (no
+ * Timing-Allow-Origin header, or a reused connection). The Availability column
+ * says which, so a blank is never mistaken for zero milliseconds.
+ */
+export function generateEdgePathCsv(items: HistoryItem[]): string {
+  const rows: string[][] = [];
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Target Host',
+    'Serving Edge (IATA)',
+    'Edge City',
+    'Edge Country',
+    'Client ASN',
+    'Client Network',
+    'Distance To Edge (km)',
+    'Probed Origin',
+    'Availability',
+    'Protocol',
+    'DNS (ms)',
+    'TCP (ms)',
+    'TLS (ms)',
+    'TTFB (ms)',
+    'Transfer (ms)',
+    'Round Trip (ms)',
+    'Max Distance (km)',
+    'Protocol Verdict',
+  ];
+
+  items
+    .filter((i) => i.type === 'edgepath')
+    .forEach((item) => {
+      const d = (item.data ?? {}) as Partial<EdgePathResult>;
+      const dateStr = new Date(item.timestamp).toLocaleString();
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(dateStr),
+        escapeCsv(d.targetHost ?? ''),
+        escapeCsv(d.referencePop?.colo ?? ''),
+        escapeCsv(d.referencePop?.city ?? ''),
+        escapeCsv(d.referencePop?.country ?? ''),
+        escapeCsv(d.client?.asn ? `AS${d.client.asn}` : ''),
+        escapeCsv(d.client?.asOrganization ?? ''),
+        escapeCsv(d.clientToPopKm ?? ''),
+      ];
+
+      const probes = d.probes ?? [];
+      if (probes.length === 0) {
+        rows.push([...shared, ...Array(10).fill(escapeCsv(''))]);
+        return;
+      }
+
+      for (const p of probes) {
+        rows.push([
+          ...shared,
+          escapeCsv(p.target?.origin ?? ''),
+          escapeCsv(p.availability ?? ''),
+          escapeCsv(p.protocol ?? ''),
+          escapeCsv(p.phases?.dnsMs ?? ''),
+          escapeCsv(p.phases?.tcpMs ?? ''),
+          escapeCsv(p.phases?.tlsMs ?? ''),
+          escapeCsv(p.phases?.ttfbMs ?? ''),
+          escapeCsv(p.phases?.transferMs ?? ''),
+          escapeCsv(p.roundTripMs ?? ''),
+          escapeCsv(p.maxDistanceKm ?? ''),
+          escapeCsv(d.protocolEvidence?.verdict ?? ''),
+        ]);
+      }
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
 // Generate Generic CSV for other test types
 export function generateGenericCsv(items: HistoryItem[], type: string): string {
   const filtered = items.filter((i) => i.type === type);
@@ -450,6 +530,8 @@ export function getCsvForType(items: HistoryItem[], type: string): string {
       return generateDnsCsv(items);
     case 'geoip':
       return generateGeoIpCsv(items);
+    case 'edgepath':
+      return generateEdgePathCsv(items);
     default:
       return generateGenericCsv(items, type);
   }

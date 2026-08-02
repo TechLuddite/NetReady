@@ -359,25 +359,52 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Traceroute TRACERT Hop Map */}
           <div
-            onClick={() => setActiveTab('tracert')}
+            onClick={() => setActiveTab('edgepath')}
             className="group bg-gradient-to-br from-cyan-950/40 via-slate-900 to-slate-900 border border-cyan-500/30 hover:border-cyan-400 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-xl hover:shadow-cyan-500/10 hover:-translate-y-0.5"
           >
             <div className="w-10 h-10 rounded-xl bg-cyan-500 text-black flex items-center justify-center mb-3 shadow-[0_0_15px_rgba(6,182,212,0.4)]">
-              <GitCommit className="w-5 h-5 rotate-90 stroke-[2.5]" />
+              <Compass className="w-5 h-5 stroke-[2.5]" />
             </div>
             <div className="flex items-center space-x-2 mb-1">
               <h3 className="text-base font-bold text-white group-hover:text-cyan-400 transition-colors">
-                Traceroute Hop Map
+                Edge Path Explorer
               </h3>
-              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded uppercase">
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
                 New
               </span>
             </div>
             <p className="text-xs text-slate-300 line-clamp-2">
-              Trace network hops, intermediate transit nodes, GeoIP locations, and follow every hop live on an interactive map.
+              Real DNS, TCP, TLS and first-byte timings, the CDN edge that answered, and whether
+              HTTP/3 is reaching your network.
             </p>
             <div className="mt-4 flex items-center text-xs font-semibold text-cyan-400 group-hover:translate-x-1 transition-transform">
-              <span>Launch Tracert Map</span>
+              <span>Explore edge path</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
+          {/* Route model (simulated) */}
+          <div
+            onClick={() => setActiveTab('tracert')}
+            className="group bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center mb-3 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors">
+              <GitCommit className="w-5 h-5 rotate-90" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-slate-100 group-hover:text-amber-300 transition-colors">
+                Route Model
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded uppercase">
+                Simulated
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 line-clamp-2">
+              An illustrative great-circle path to a target. Browsers cannot traceroute, so the
+              intermediate hops are modelled rather than measured.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-amber-300 group-hover:translate-x-1 transition-transform">
+              <span>Open route model</span>
               <ArrowRight className="w-3.5 h-3.5 ml-1" />
             </div>
           </div>

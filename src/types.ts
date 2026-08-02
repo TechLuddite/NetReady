@@ -1,5 +1,6 @@
-export type ToolTab = 
+export type ToolTab =
   | 'dashboard'
+  | 'edgepath'
   | 'tracert'
   | 'portscanner'
   | 'geoip'
@@ -280,9 +281,147 @@ export interface GeoIpResult {
   isVpn?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Edge Path Explorer
+//
+// What a browser can genuinely observe about the path to a host: the phase
+// breakdown of a connection, which CDN edge answered, what protocol was
+// negotiated, and an upper bound on distance implied by round-trip time.
+//
+// What it cannot observe is any intermediate router, because there is no way to
+// send an ICMP packet or set an IP TTL from a web page. Nothing here claims to.
+// ---------------------------------------------------------------------------
+
+/** Why a phase breakdown is unavailable for a given target. */
+export type TimingAvailability =
+  | 'available'
+  /** Cross-origin responses zero out every phase field unless the server sends
+   *  a `Timing-Allow-Origin` header. Those zeros are not "0 ms". */
+  | 'timing-allow-origin-missing'
+  /** DNS, TCP and TLS only happen on the first connection to an origin. A
+   *  reused connection legitimately has no handshake to report. */
+  | 'connection-reused'
+  | 'request-failed';
+
+/**
+ * Connection phase breakdown from the Resource Timing API. Each field is
+ * milliseconds spent in that phase, or null when it was not observable.
+ */
+export interface PhaseTimings {
+  dnsMs: number | null;
+  tcpMs: number | null;
+  /** TLS handshake, contained within the TCP connect window. */
+  tlsMs: number | null;
+  /** Time to first byte: request sent → first byte of response. */
+  ttfbMs: number | null;
+  /** Content download: first byte → last byte. */
+  transferMs: number | null;
+  totalMs: number | null;
+}
+
+export interface EdgeTarget {
+  label: string;
+  /** Origin probed, e.g. `https://speed.cloudflare.com`. */
+  origin: string;
+  /** Small resource fetched to elicit the timings. */
+  probeUrl: string;
+  /** Whether this origin is expected to send Timing-Allow-Origin. Verified at
+   *  runtime — this only drives target ordering, never the reported result. */
+  expectsTao: boolean;
+}
+
+export interface EdgeProbeResult {
+  target: EdgeTarget;
+  availability: TimingAvailability;
+  phases: PhaseTimings;
+  /** Negotiated protocol: 'h3', 'h2', 'http/1.1'. Null when TAO is absent. */
+  protocol: string | null;
+  /** Wall-clock round trip, always measurable even without TAO. */
+  roundTripMs: number | null;
+  /** Upper bound on client→server distance implied by roundTripMs. */
+  maxDistanceKm: number | null;
+  error?: string;
+}
+
+/** The CDN edge that answered, resolved to a real location. */
+export interface EdgePop {
+  /** IATA code reported by the edge, e.g. 'SYD'. */
+  colo: string;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+  /** True when the colo code was not in the bundled IATA table. */
+  unmappedCode: boolean;
+  /** Protocol the edge reported for this connection. */
+  httpProtocol: string | null;
+}
+
+/** Client identity as the edge sees it. Distinct from the edge's own location. */
+export interface EdgeClientView {
+  ip: string | null;
+  asn: number | null;
+  asOrganization: string | null;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+/**
+ * Evidence about HTTP/3 support. A network that blocks UDP/443 forces a fallback
+ * to HTTP/2 even against origins that advertise h3, which is directly
+ * observable and worth surfacing.
+ */
+export interface ProtocolEvidence {
+  /** Protocols negotiated across all probed origins, deduplicated. */
+  negotiated: string[];
+  h3Count: number;
+  h2Count: number;
+  http1Count: number;
+  /** Null when no origin produced a readable protocol. */
+  verdict:
+    | 'http3-working'
+    | 'http3-absent-udp-possibly-blocked'
+    | 'http2-only'
+    | 'legacy-http1'
+    | null;
+  explanation: string;
+}
+
+export interface EdgePathResult {
+  id: string;
+  timestamp: number;
+  /** Host the user asked about, if any. */
+  targetHost: string | null;
+  /** Edge that served the target host, when it is behind a readable CDN. */
+  targetPop: EdgePop | null;
+  /** Edge that served NetReady's own reference probe. */
+  referencePop: EdgePop | null;
+  client: EdgeClientView | null;
+  probes: EdgeProbeResult[];
+  protocolEvidence: ProtocolEvidence;
+  /** Great-circle distance client→edge, when both locations are known. */
+  clientToPopKm: number | null;
+  totalTimeMs: number;
+  failures: MeasurementFailure[];
+}
+
 export interface HistoryItem {
   id: string;
-  type: 'speedtest' | 'ping' | 'dns' | 'webrtc' | 'httpprobe' | 'websocket' | 'cidr' | 'mac' | 'portscanner' | 'tracert' | 'geoip';
+  type:
+    | 'speedtest'
+    | 'ping'
+    | 'dns'
+    | 'webrtc'
+    | 'httpprobe'
+    | 'websocket'
+    | 'cidr'
+    | 'mac'
+    | 'portscanner'
+    | 'tracert'
+    | 'geoip'
+    | 'edgepath';
   timestamp: number;
   title: string;
   summary: string;

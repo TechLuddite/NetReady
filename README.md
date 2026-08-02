@@ -65,17 +65,30 @@ Geolocation, ISP, ASN and proxy/VPN signals for an IP or domain, via third-party
 ### 11. 📊 Live Traffic Monitor
 Real-time throughput and latency from the browser's own Performance Timeline.
 
-### 12. 🗺️ Route Model *(simulated — read this)*
+### 12. 🧭 Edge Path Explorer
+Everything a browser can genuinely observe about the path to a host:
+
+- **Connection phase breakdown** — real DNS → TCP → TLS → time-to-first-byte → transfer timings
+  from the Performance Timeline. Cross-origin phases require a `Timing-Allow-Origin` header, and
+  handshake phases only exist on a connection's *first* request; both conditions are detected and
+  reported rather than shown as zeros.
+- **Which CDN edge answered**, by IATA code, resolved against a bundled airport table to a real
+  coordinate. An unknown code is flagged, not guessed.
+- **HTTP/3 negotiation** — if every h3-capable origin falls back to HTTP/2, that is direct evidence
+  UDP/443 is blocked upstream by a firewall or middlebox.
+- **Latency horizon** — light travels ~200 km/ms in fibre, so a round trip puts a hard ceiling on
+  how far away a server can be. Drawn as a constraint circle: the endpoint is somewhere inside it.
+  This is a proof, not an estimate — queuing delay only loosens the bound.
+
+### 13. 🗺️ Route Model *(simulated — read this)*
 Resolves a target, looks up its real location, and draws a plausible great-circle path to it.
 
 **The intermediate hops are generated, not measured.** Browsers cannot send ICMP packets or set an
 IP TTL, so no web page can perform a real traceroute. The first and last hops are grounded in a real
 DNS resolution and a real geolocation lookup; everything between them is illustrative. Exports mark
-these records as simulated. A replacement built on things the browser genuinely can observe — real
-DNS/TCP/TLS/TTFB phase timings, the CDN edge you're actually routed to, and HTTP/3 negotiation — is
-the next major piece of work.
+these records as simulated. Use the Edge Path Explorer above for measurements you can rely on.
 
-### 13. 💾 History & Export
+### 14. 💾 History & Export
 Results persist in `localStorage`. Search, filter, inspect raw JSON, and export per-tool CSVs, a
 master summary, or a bundled ZIP with a manifest.
 
@@ -112,6 +125,7 @@ without touching it, so the following go directly from your browser to third par
 | Provider | Receives |
 |---|---|
 | `speed.cloudflare.com` | Your IP, plus tens of MB of transfer, during a speed test |
+| `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `unpkg.com` | Your IP, as Edge Path Explorer probe targets (a few KB each) |
 | `cloudflare-dns.com`, `dns.google` | Every domain you resolve, over encrypted DoH |
 | `ipwho.is`, `ipapi.co`, `freeipapi.com` | Your public IP on opening the GeoIP tool, and every IP or domain you look up |
 | `1.1.1.1`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets |
