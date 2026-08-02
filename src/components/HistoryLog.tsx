@@ -124,7 +124,7 @@ export const HistoryLog: React.FC<HistoryLogProps> = ({ history, onHistoryUpdate
 
         {/* Type Filter Buttons */}
         <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/5">
-          {['all', 'tracert', 'portscanner', 'speedtest', 'ping', 'dns', 'webrtc', 'cidr', 'mac', 'httpprobe', 'websocket'].map((t) => (
+          {['all', 'edgepath', 'tracert', 'portscanner', 'geoip', 'speedtest', 'ping', 'dns', 'webrtc', 'cidr', 'mac', 'httpprobe', 'websocket'].map((t) => (
             <button
               key={t}
               onClick={() => setTypeFilter(t)}
