@@ -21,6 +21,24 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
     receives: 'Every domain name you resolve, over encrypted DNS-over-HTTPS.',
   },
   {
+    host:
+      'cloudflare-dns.com, dns.google, dns.quad9.net, dns10.quad9.net, ' +
+      'freedns.controld.com, doh.sb, public.dns.iij.jp',
+    receives:
+      'Your IP and every name the DNS benchmark queries, when you run it — roughly twenty each. ' +
+      'Most of those names are randomly generated (they have to be, or the resolver would answer ' +
+      'from its cache and there would be nothing to measure), so each provider sees a set of ' +
+      'unique strings that identifies that run to them. The rest are well-known names such as ' +
+      'google.com. Each provider has its own logging and filtering practices.',
+  },
+  {
+    host: 'dnssec-failed.org, internetsociety.org',
+    receives:
+      'Nothing directly — your browser never contacts them. Their names are sent to the DNS ' +
+      'providers above as the DNSSEC test pair: one has a deliberately broken signature chain, ' +
+      'the other a valid one. Only the resolvers see these queries.',
+  },
+  {
     host: 'ipwho.is / ipapi.co / freeipapi.com',
     receives:
       'Your public IP when you open the GeoIP tool, and every IP or domain you look up or trace.',

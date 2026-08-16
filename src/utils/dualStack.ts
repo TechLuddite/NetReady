@@ -4,7 +4,7 @@ import type {
   FamilyProbe,
   MeasurementFailure,
 } from '../types';
-import { createId } from './network';
+import { createId, timeoutSignal } from './network';
 
 /**
  * Dual-stack (IPv4 / IPv6) reachability.
@@ -77,21 +77,6 @@ export function familyOfIp(raw: string | null | undefined): AddressFamily | null
   if (octets.length !== 4) return null;
   const valid = octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255);
   return valid ? 'ipv4' : null;
-}
-
-/** AbortSignal that fires on timeout or when the caller aborts. */
-function timeoutSignal(ms: number, external?: AbortSignal): { signal: AbortSignal; done: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  const onAbort = () => controller.abort();
-  external?.addEventListener('abort', onAbort);
-  return {
-    signal: controller.signal,
-    done: () => {
-      clearTimeout(timer);
-      external?.removeEventListener('abort', onAbort);
-    },
-  };
 }
 
 /**

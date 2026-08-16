@@ -8,6 +8,7 @@ import {
   generateTriageCsv,
   generateDualStackCsv,
   generateCaptivePortalCsv,
+  generateDnsBenchmarkCsv,
   TEST_TYPES,
 } from './export';
 import type { HistoryItem } from '../types';
@@ -371,6 +372,129 @@ describe('answer-layer exports', () => {
       },
     };
     expect(generateCaptivePortalCsv([item])).toContain('"\'=cmd');
+  });
+});
+
+describe('generateDnsBenchmarkCsv', () => {
+  const resolver = (over: Record<string, unknown> = {}) => ({
+    resolverId: 'cloudflare',
+    label: 'Cloudflare',
+    operator: 'Cloudflare, Inc.',
+    endpoint: 'https://cloudflare-dns.com/dns-query',
+    policyNote: '',
+    cached: { answered: 5, attempted: 5, medianMs: 18, p95Ms: null, minMs: 15, maxMs: 24, stdDevMs: 3 },
+    uncached: { answered: 5, attempted: 5, medianMs: 41, p95Ms: null, minMs: 38, maxMs: 50, stdDevMs: 4 },
+    dotcom: { answered: 5, attempted: 5, medianMs: 33, p95Ms: null, minMs: 30, maxMs: 40, stdDevMs: 3 },
+    uncachedCostMs: 23,
+    nxdomainHonesty: 'honest',
+    nxdomainDetail: '',
+    dnssec: 'validates',
+    dnssecDetail: '',
+    outcome: 'measured',
+    note: 'Cloudflare answered every kind of query.',
+    ...over,
+  });
+
+  const item = (resolvers: unknown[], over: Record<string, unknown> = {}): HistoryItem => ({
+    id: 'bench_1',
+    type: 'dnsbench',
+    timestamp: 1,
+    title: 't',
+    summary: 's',
+    data: {
+      resolvers,
+      samplesPerMetric: 5,
+      dnssecRequested: true,
+      fastestCachedResolverId: 'cloudflare',
+      fastestIsWithinNoise: false,
+      failures: [],
+      ...over,
+    },
+  });
+
+  it('writes every field under the name the interface actually uses', () => {
+    // The direct guard against the six-column-silently-blank class of bug: if a
+    // field is renamed in types.ts, the cast in the generator fails to compile
+    // and this assertion fails if it does not.
+    const [, row] = generateDnsBenchmarkCsv([item([resolver()])]).split('\n');
+    expect(row).toContain('"Cloudflare"');
+    expect(row).toContain('"Cloudflare, Inc."');
+    expect(row).toContain('"18"');
+    expect(row).toContain('"41"');
+    expect(row).toContain('"33"');
+    expect(row).toContain('"23"');
+    expect(row).toContain('"honest"');
+    expect(row).toContain('"validates"');
+  });
+
+  it('leaves unmeasured values blank instead of writing 0', () => {
+    // A resolver the browser could not reach would otherwise export as the
+    // fastest one in the file.
+    const empty = { answered: 0, attempted: 5, medianMs: null, p95Ms: null, minMs: null, maxMs: null, stdDevMs: null };
+    const [, row] = generateDnsBenchmarkCsv([
+      item([
+        resolver({
+          cached: empty,
+          uncached: empty,
+          dotcom: empty,
+          uncachedCostMs: null,
+          dnssec: null,
+          outcome: 'no-readable-answer',
+          note: 'No readable answer came back.',
+        }),
+      ]),
+    ]).split('\n');
+    expect(row).toContain('""');
+    expect(row).toContain('"no-readable-answer"');
+    expect(row).toContain('"not checked"');
+    // The answered/attempted counters are genuine zeroes and must survive.
+    expect(row).toContain('"0"');
+    expect(row).not.toContain('"0","0","0","0","0"');
+  });
+
+  it('exports a genuine zero rather than dropping it', () => {
+    // The pair to the test above: this is what proves the generator uses `??`
+    // and not `||`.
+    const [, row] = generateDnsBenchmarkCsv([
+      item([resolver({ uncachedCostMs: 0 })]),
+    ]).split('\n');
+    expect(row).toContain('"0"');
+  });
+
+  it('preserves a negative cost, escaped against formula injection', () => {
+    // A negative is a real observation about TTLs and anycast, and escapeCsv's
+    // leading-minus guard must not swallow it.
+    const [, row] = generateDnsBenchmarkCsv([
+      item([resolver({ uncachedCostMs: -4 })]),
+    ]).split('\n');
+    expect(row).toContain('"\'-4"');
+  });
+
+  it('escapes a formula-injecting resolver note', () => {
+    // Notes embed fetch error messages, i.e. third-party-influenced text.
+    const csv = generateDnsBenchmarkCsv([
+      item([resolver({ note: '=cmd|\'/c calc\'!A1' })]),
+    ]);
+    expect(csv).toContain('"\'=cmd');
+  });
+
+  it('still exports a row for a run that measured nothing', () => {
+    // An offline run has to stay distinguishable from a run that never happened.
+    const csv = generateDnsBenchmarkCsv([
+      item([], {
+        fastestCachedResolverId: null,
+        fastestIsWithinNoise: null,
+        failures: [{ metric: 'all', reason: 'network-offline', detail: 'No network connection.' }],
+      }),
+    ]);
+    const [, row] = csv.split('\n');
+    expect(row).toContain('all: No network connection.');
+    expect(row).toContain('"not determined"');
+  });
+
+  it('routes through the dispatcher and is a declared export type', () => {
+    expect(getCsvForType([item([resolver()])], 'dnsbench')).toContain('Cloudflare');
+    expect(TEST_TYPES.map((t) => t.id)).toContain('dnsbench');
   });
 });
 

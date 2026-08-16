@@ -25,6 +25,7 @@ import {
   Stethoscope,
   Network,
   ShieldQuestion,
+  Timer,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo } from '../types';
 import { PrivacySafetyModal } from './PrivacySafetyModal';
@@ -64,6 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'speedtest', label: 'Speed Test', icon: Gauge },
     { id: 'ping', label: 'Ping & Jitter', icon: Radio },
     { id: 'dns', label: 'DoH DNS', icon: Globe },
+    { id: 'dnsbench', label: 'DNS Benchmark', icon: Timer, badge: 'NEW' },
     { id: 'webrtc', label: 'WebRTC STUN', icon: Cpu },
     { id: 'cidr', label: 'CIDR Subnet', icon: Calculator },
     { id: 'mac', label: 'MAC / OUI', icon: Search },
