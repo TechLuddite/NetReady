@@ -21,6 +21,7 @@ import {
   Stethoscope,
   Network,
   ShieldQuestion,
+  Timer,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo, SpeedTestResult, PingResult, HistoryItem } from '../types';
 import {
@@ -424,6 +425,32 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </p>
             <div className="mt-4 flex items-center text-xs font-semibold text-indigo-300 group-hover:translate-x-1 transition-transform">
               <span>Check both families</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
+          {/* DNS resolver benchmark */}
+          <div
+            onClick={() => setActiveTab('dnsbench')}
+            className="group bg-slate-900 border border-slate-800 hover:border-sky-500/50 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-lg hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center mb-3 group-hover:bg-sky-500 group-hover:text-slate-950 transition-colors">
+              <Timer className="w-5 h-5" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-slate-100 group-hover:text-sky-300 transition-colors">
+                DNS Resolver Benchmark
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
+                New
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 line-clamp-2">
+              Cached, uncached and .com lookups timed across public DoH resolvers — the split Steve
+              Gibson designed for GRC&rsquo;s DNS Benchmark, as far as a browser can take it.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-sky-300 group-hover:translate-x-1 transition-transform">
+              <span>Compare resolvers</span>
               <ArrowRight className="w-3.5 h-3.5 ml-1" />
             </div>
           </div>

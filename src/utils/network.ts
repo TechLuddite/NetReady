@@ -39,6 +39,134 @@ export function createId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/**
+ * AbortSignal that fires on timeout or when the caller aborts.
+ *
+ * Lives here because three tools need it. It was copy-pasted verbatim into
+ * `dualStack.ts` and `captivePortal.ts` first; the third caller was the point
+ * to stop duplicating it.
+ *
+ * Always pair with `try { … } finally { gate.done() }` — the timer keeps the
+ * event loop alive otherwise, which in a many-query loop is thousands of live
+ * timers.
+ */
+export function timeoutSignal(
+  ms: number,
+  external?: AbortSignal,
+): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const onAbort = () => controller.abort();
+  external?.addEventListener('abort', onAbort);
+  return {
+    signal: controller.signal,
+    done: () => {
+      clearTimeout(timer);
+      external?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+/**
+ * Linear-interpolated percentile — the R-7 definition, the one Excel's
+ * PERCENTILE.INC and NumPy's default both use.
+ *
+ * The method is named because "p95" on its own is ambiguous: the three common
+ * definitions (nearest-rank, R-6, R-7) disagree by a whole sample at the sizes
+ * this project works with, and a reader comparing NetReady's figure to another
+ * tool's deserves to know which one they are looking at.
+ *
+ * Returns null for an empty array. `p` is a fraction in 0-1.
+ */
+export function percentile(samples: readonly number[], p: number): number | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  if (sorted.length === 1) return sorted[0];
+
+  const clamped = Math.min(1, Math.max(0, p));
+  const rank = clamped * (sorted.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (rank - lower) * (sorted[upper] - sorted[lower]);
+}
+
+/** Median. Separate from `percentile(s, 0.5)` only for readability at call
+ *  sites; it is the same calculation. Null for an empty array. */
+export function median(samples: readonly number[]): number | null {
+  return percentile(samples, 0.5);
+}
+
+/**
+ * Sample standard deviation (the n-1 divisor).
+ *
+ * Null below two samples, for the same reason `meanConsecutiveDelta` is: the
+ * spread across a single point is not zero spread, it is no spread. Returning 0
+ * would tell a reader the measurement was perfectly consistent when in fact it
+ * happened once.
+ */
+export function sampleStdDev(samples: readonly number[]): number | null {
+  if (samples.length < 2) return null;
+  const mean = samples.reduce((sum, s) => sum + s, 0) / samples.length;
+  const variance =
+    samples.reduce((sum, s) => sum + (s - mean) ** 2, 0) / (samples.length - 1);
+  return Math.sqrt(variance);
+}
+
+export interface SampleSummary {
+  /** Always present, even when every statistic below is null, so a caller can
+   *  distinguish "measured once" from "never measured". */
+  n: number;
+  medianMs: number | null;
+  p95Ms: number | null;
+  minMs: number | null;
+  maxMs: number | null;
+  stdDevMs: number | null;
+}
+
+/** Below this many samples, no summary statistic is reported at all. */
+export const MIN_SAMPLES_FOR_SUMMARY = 3;
+
+/** p95 needs more samples than a median does — see the comment in
+ *  `summariseSamples`. */
+export const MIN_SAMPLES_FOR_P95 = 10;
+
+/**
+ * Summarises timing samples, refusing to report statistics the sample count
+ * cannot support.
+ *
+ * Below `minSamples` every figure is null, so a resolver that answered once
+ * cannot contribute a confident-looking median to a comparison table.
+ *
+ * p95 stays null below ten samples even when the median exists. At n=5 the R-7
+ * p95 sits within one interpolation step of the maximum, so reporting it would
+ * be relabelling "the slowest sample" as "the 95th percentile" — a different
+ * and much stronger claim than the data supports.
+ *
+ * Milliseconds are rounded to whole numbers throughout. Browsers deliberately
+ * coarsen `performance.now()` (100 µs in Chrome by default, more under some
+ * isolation settings), and the differences this project reports are tens of
+ * milliseconds; a decimal place would imply a resolution the clock does not have.
+ */
+export function summariseSamples(
+  samples: readonly number[],
+  minSamples: number = MIN_SAMPLES_FOR_SUMMARY,
+): SampleSummary {
+  if (samples.length < minSamples) {
+    return { n: samples.length, medianMs: null, p95Ms: null, minMs: null, maxMs: null, stdDevMs: null };
+  }
+
+  const round = (v: number | null): number | null => (v === null ? null : Math.round(v));
+  return {
+    n: samples.length,
+    medianMs: round(median(samples)),
+    p95Ms: samples.length >= MIN_SAMPLES_FOR_P95 ? round(percentile(samples, 0.95)) : null,
+    minMs: round(Math.min(...samples)),
+    maxMs: round(Math.max(...samples)),
+    stdDevMs: round(sampleStdDev(samples)),
+  };
+}
+
 export function getNetworkConnectionInfo(): NetworkConnectionInfo {
   const nav = navigator as any;
   const conn = nav.connection || nav.mozConnection || nav.webkitConnection;

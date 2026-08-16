@@ -47,6 +47,12 @@ grep -rn 'Math.random' src/utils/
 The first should return only genuine coefficients in formulas. The second should return
 only ID generation and cache-busters — `createId()` and `_cb=`/`_nr=` query params.
 
+`dnsBenchmark.ts` also generates randomness, via `crypto.getRandomValues` rather than
+`Math.random` so the grep above stays clean. Two sanctioned uses, both commented:
+`randomMessageId()` (a fresh DNS message ID per query — the cache-buster, because a
+`_nr=` parameter makes Quad9 return 403) and `randomLabel()` (labels for names that must
+not be in any cache). Anything else there is a bug.
+
 ---
 
 ## Know what a browser genuinely cannot do

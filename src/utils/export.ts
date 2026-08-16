@@ -8,6 +8,7 @@ import type {
   GeoIpResult,
   EdgePathResult,
   DualStackResult,
+  DnsBenchmarkResult,
   CaptivePortalResult,
   DnsIntegrityResult,
 } from '../types';
@@ -16,6 +17,7 @@ import type { TriageVerdict } from '../analysis/types';
 export const TEST_TYPES = [
   { id: 'triage', label: 'Network Triage Verdicts', filename: 'triage_results.csv', icon: 'Stethoscope' },
   { id: 'dualstack', label: 'IPv4 / IPv6 Reachability', filename: 'dualstack_results.csv', icon: 'Network' },
+  { id: 'dnsbench', label: 'DNS Resolver Benchmark', filename: 'dnsbench_results.csv', icon: 'Timer' },
   { id: 'captive', label: 'Portal & DNS Hijack Checks', filename: 'captive_results.csv', icon: 'ShieldQuestion' },
   { id: 'tracert', label: 'Traceroute (TRACERT)', filename: 'tracert_results.csv', icon: 'GitCommit' },
   { id: 'speedtest', label: 'Speed Test Results', filename: 'speedtest_results.csv', icon: 'Gauge' },
@@ -658,6 +660,115 @@ export function generateDualStackCsv(items: HistoryItem[]): string {
 }
 
 /**
+ * DNS resolver benchmark CSV — one row per resolver per run.
+ *
+ * Every millisecond column is a DNS-over-HTTPS round trip, not a UDP DNS
+ * timing, and the header says so rather than leaving a reader to assume the
+ * numbers are comparable to a native tool's.
+ *
+ * Absent figures are blank, never zero. That matters more here than elsewhere:
+ * a resolver a browser could not reach would otherwise export as the fastest
+ * one in the file.
+ */
+export function generateDnsBenchmarkCsv(items: HistoryItem[]): string {
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Samples Per Metric',
+    'DNSSEC Checked',
+    'Fastest Cached Resolver',
+    'Fastest Within Noise',
+    'Resolver',
+    'Operator',
+    'Endpoint',
+    'Outcome',
+    'Cached Median (ms)',
+    'Cached Min (ms)',
+    'Cached Max (ms)',
+    'Cached Answered',
+    'Cached Attempted',
+    'Uncached Median (ms)',
+    'Uncached Answered',
+    'Uncached Attempted',
+    'Dotcom Median (ms)',
+    'Dotcom Answered',
+    'Dotcom Attempted',
+    'Extra vs Cached (ms)',
+    'Bad Name Behaviour',
+    'DNSSEC',
+    'Resolver Note',
+    'Not Measured',
+  ];
+
+  const word = (v: boolean | null | undefined): string => {
+    if (v === null || v === undefined) return 'not determined';
+    return v ? 'yes' : 'no';
+  };
+
+  const rows: string[][] = [];
+
+  items
+    .filter((i) => i.type === 'dnsbench')
+    .forEach((item) => {
+      // Cast at the boundary so tsc checks these field names against the real
+      // interface. Six CSV columns once shipped permanently empty because a
+      // generator read `downloadMbps` from an object holding `downloadSpeed`.
+      const d = (item.data ?? {}) as Partial<DnsBenchmarkResult>;
+      const resolvers = d.resolvers ?? [];
+      const fastest = resolvers.find((r) => r.resolverId === d.fastestCachedResolverId);
+
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(new Date(item.timestamp).toLocaleString()),
+        escapeCsv(d.samplesPerMetric ?? ''),
+        escapeCsv(word(d.dnssecRequested)),
+        escapeCsv(fastest?.label ?? ''),
+        escapeCsv(word(d.fastestIsWithinNoise)),
+      ];
+      const notMeasured = escapeCsv(
+        (d.failures ?? []).map((f) => `${f.metric}: ${f.detail}`).join(' | '),
+      );
+
+      if (resolvers.length === 0) {
+        // An offline run still exports a row, so it stays distinguishable from
+        // a run that never happened.
+        rows.push([...shared, ...Array(19).fill(escapeCsv('')), notMeasured]);
+        return;
+      }
+
+      resolvers.forEach((r) => {
+        rows.push([
+          ...shared,
+          escapeCsv(r.label),
+          escapeCsv(r.operator),
+          escapeCsv(r.endpoint),
+          escapeCsv(r.outcome),
+          escapeCsv(r.cached.medianMs ?? ''),
+          escapeCsv(r.cached.minMs ?? ''),
+          escapeCsv(r.cached.maxMs ?? ''),
+          escapeCsv(r.cached.answered),
+          escapeCsv(r.cached.attempted),
+          escapeCsv(r.uncached.medianMs ?? ''),
+          escapeCsv(r.uncached.answered),
+          escapeCsv(r.uncached.attempted),
+          escapeCsv(r.dotcom.medianMs ?? ''),
+          escapeCsv(r.dotcom.answered),
+          escapeCsv(r.dotcom.attempted),
+          escapeCsv(r.uncachedCostMs ?? ''),
+          escapeCsv(r.nxdomainHonesty),
+          escapeCsv(r.dnssec ?? 'not checked'),
+          escapeCsv(r.note),
+          notMeasured,
+        ]);
+      });
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
+/**
  * Captive-portal / DNS-hijack CSV — one row per integrity probe.
  *
  * The stored record holds both halves of the check, so the DNS verdict is
@@ -776,6 +887,8 @@ export function getCsvForType(items: HistoryItem[], type: string): string {
       return generateTriageCsv(items);
     case 'dualstack':
       return generateDualStackCsv(items);
+    case 'dnsbench':
+      return generateDnsBenchmarkCsv(items);
     case 'captive':
       return generateCaptivePortalCsv(items);
     default:

@@ -6,6 +6,7 @@ import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { TriagePanel } from './components/TriagePanel';
 import { DualStackCheck } from './components/DualStackCheck';
+import { DnsBenchmark } from './components/DnsBenchmark';
 import { CaptivePortalCheck } from './components/CaptivePortalCheck';
 import { EdgePathExplorer } from './components/EdgePathExplorer';
 import { TracertVisualizer } from './components/TracertVisualizer';
@@ -86,6 +87,7 @@ export default function App() {
         {activeTab === 'triage' && <TriagePanel onHistoryUpdate={refreshHistory} />}
 
         {activeTab === 'dualstack' && <DualStackCheck onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'dnsbench' && <DnsBenchmark onHistoryUpdate={refreshHistory} />}
 
         {activeTab === 'captive' && <CaptivePortalCheck onHistoryUpdate={refreshHistory} />}
 

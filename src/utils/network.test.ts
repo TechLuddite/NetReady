@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { meanConsecutiveDelta, createId, calculateNetReadyScore, parseTargetHosts } from './network';
+import {
+  meanConsecutiveDelta,
+  createId,
+  calculateNetReadyScore,
+  parseTargetHosts,
+  percentile,
+  median,
+  sampleStdDev,
+  summariseSamples,
+} from './network';
 import { isPrivateOrLoopback } from './tracert';
 import type { SpeedTestResult, PingResult } from '../types';
 
@@ -160,5 +169,110 @@ describe('isPrivateOrLoopback', () => {
     for (const ip of ['8.8.8.8', '1.1.1.1', '172.32.0.1', '192.169.0.1', '11.0.0.1']) {
       expect(isPrivateOrLoopback(ip)).toBe(false);
     }
+  });
+});
+
+describe('percentile', () => {
+  it('returns null rather than a number when there is nothing to summarise', () => {
+    expect(percentile([], 0.5)).toBeNull();
+  });
+
+  it('returns the only sample when there is one', () => {
+    expect(percentile([5], 0.5)).toBe(5);
+    expect(percentile([5], 0.95)).toBe(5);
+  });
+
+  it('interpolates the way R-7 does', () => {
+    // Pinned to exact values so a future switch to nearest-rank fails loudly
+    // instead of quietly shifting every reported percentile in the app.
+    expect(percentile([1, 2, 3, 4], 0.5)).toBe(2.5);
+    expect(percentile([1, 2, 3, 4, 5], 0.95)).toBeCloseTo(4.8, 10);
+    expect(percentile([1, 2, 3, 4, 5], 0)).toBe(1);
+    expect(percentile([1, 2, 3, 4, 5], 1)).toBe(5);
+  });
+
+  it('does not depend on the caller having sorted the input', () => {
+    expect(percentile([5, 1, 3, 2, 4], 0.5)).toBe(3);
+  });
+
+  it('leaves the caller’s array alone', () => {
+    const samples = [3, 1, 2];
+    percentile(samples, 0.5);
+    expect(samples).toEqual([3, 1, 2]);
+  });
+});
+
+describe('median', () => {
+  it('is null on an empty array and correct on an odd and even count', () => {
+    expect(median([])).toBeNull();
+    expect(median([9, 1, 5])).toBe(5);
+    expect(median([1, 2, 3, 4])).toBe(2.5);
+  });
+});
+
+describe('sampleStdDev', () => {
+  it('returns null below two samples', () => {
+    // The spread of one point is not zero spread, it is no spread. Reporting 0
+    // would claim a consistency that was never observed.
+    expect(sampleStdDev([])).toBeNull();
+    expect(sampleStdDev([7])).toBeNull();
+  });
+
+  it('uses the n-1 divisor', () => {
+    expect(sampleStdDev([2, 4, 4, 4, 5, 5, 7, 9])!).toBeCloseTo(2.13809, 4);
+  });
+
+  it('reports genuinely identical samples as zero spread', () => {
+    expect(sampleStdDev([4, 4, 4])).toBe(0);
+  });
+});
+
+describe('summariseSamples', () => {
+  const many = (n: number): number[] => Array.from({ length: n }, (_, i) => i + 1);
+
+  it('reports the sample count but no statistics below the minimum', () => {
+    // n stays readable so a caller can tell "measured twice" from "never
+    // measured", but nothing is derived from two points.
+    const s = summariseSamples([10, 20], 3);
+    expect(s.n).toBe(2);
+    expect(s.medianMs).toBeNull();
+    expect(s.p95Ms).toBeNull();
+    expect(s.minMs).toBeNull();
+    expect(s.maxMs).toBeNull();
+    expect(s.stdDevMs).toBeNull();
+  });
+
+  it('reports nothing at all for zero samples', () => {
+    const s = summariseSamples([]);
+    expect(s.n).toBe(0);
+    expect(s.medianMs).toBeNull();
+  });
+
+  it('withholds p95 until there are enough samples for it to mean anything', () => {
+    // At n=5 the R-7 p95 sits within one interpolation step of the maximum, so
+    // publishing it would relabel "the slowest sample" as a percentile.
+    const five = summariseSamples(many(5));
+    expect(five.medianMs).toBe(3);
+    expect(five.maxMs).toBe(5);
+    expect(five.p95Ms).toBeNull();
+
+    const ten = summariseSamples(many(10));
+    expect(ten.medianMs).toBe(6); // R-7 median of 1..10 is 5.5, rounded
+    expect(ten.p95Ms).toBe(10);
+  });
+
+  it('preserves a genuine zero instead of treating it as missing', () => {
+    // The `||` trap, in the newest helper: a resolver answering from memory in
+    // under half a millisecond must not read as "not measured".
+    const s = summariseSamples([0, 0, 0]);
+    expect(s.medianMs).toBe(0);
+    expect(s.minMs).toBe(0);
+    expect(s.stdDevMs).toBe(0);
+  });
+
+  it('rounds to whole milliseconds, matching the clock’s actual resolution', () => {
+    const s = summariseSamples([10.4, 10.6, 11.2]);
+    expect(s.medianMs).toBe(11);
+    expect(Number.isInteger(s.minMs)).toBe(true);
   });
 });

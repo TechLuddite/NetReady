@@ -109,6 +109,34 @@ security policy and are reported as such rather than silently skipped.
 `A`, `AAAA`, `MX`, `TXT`, `NS`, `CNAME`, `CAA`, `SRV` and `SOA` records via Cloudflare or Google,
 with response codes, TTLs and the raw JSON payload.
 
+### 4b. ⏱️ DNS Resolver Benchmark
+
+Times seven public DNS-over-HTTPS resolvers three ways — a name already in the resolver's cache, a
+random label under a popular domain that forces it out to an authoritative server, and a random
+`.com` name that forces a `.com` TLD consultation — plus whether each returns `NXDOMAIN` for names
+that do not exist, and whether each validates DNSSEC.
+
+The three-way split is [Steve Gibson's](https://www.grc.com/dns/benchmark.htm), and the reason it
+matters is his: a resolver can be instant from cache and badly connected to everything else, so
+measuring only one of those tells you neither.
+
+What a browser cannot do, and the tool says so permanently on screen rather than approximating:
+
+- **Your own resolver is not in the table and cannot be.** No raw sockets, no UDP/53, no way to
+  learn the address your system is using. For that, use Steve's native tool.
+- **Every figure includes the HTTPS round trip.** No DoH endpoint sends `Timing-Allow-Origin`, so
+  the DNS/TCP/TLS breakdown is unreadable — re-checked each run rather than asserted.
+- **Ten well-known providers** (OpenDNS, AdGuard, Mullvad, NextDNS, Cisco Umbrella, Yandex,
+  LibreDNS, CIRA, Wikimedia, Digitale Gesellschaft) send no CORS header, so a browser cannot read
+  their answers at all. They are listed with no figures rather than omitted.
+- **A failed request is not the resolver's fault.** The column is called *Answered*, never
+  *Reliability*: over HTTPS a lost query, a TLS failure, a blocking extension and a CORS rejection
+  are indistinguishable.
+
+A "fastest" resolver is named only when its observed range does not overlap the runner-up's;
+otherwise the conclusion is that this run does not separate them. Queries run one at a time and
+cycle between resolvers, so a burst of other traffic does not land on whichever went first.
+
 ### 5. 🌐 WebRTC ICE Analyzer
 Discovers public and local ICE candidates via STUN and infers NAT topology. Modern browsers return
 mDNS `.local` candidates instead of real LAN addresses, so local-interface discovery frequently
@@ -200,6 +228,8 @@ without touching it, so the following go directly from your browser to third par
 | `speed.cloudflare.com` | Your IP, plus tens of MB of transfer, during a speed test |
 | `cdn.jsdelivr.net`, `cdnjs.cloudflare.com`, `unpkg.com` | Your IP, as Edge Path Explorer probe targets (a few KB each) |
 | `cloudflare-dns.com`, `dns.google` | Every domain you resolve, over encrypted DoH |
+| `cloudflare-dns.com`, `dns.google`, `dns.quad9.net`, `dns10.quad9.net`, `freedns.controld.com`, `doh.sb`, `public.dns.iij.jp` | Your IP and every name the DNS benchmark queries — ~20 each, most randomly generated, which identifies the run to each provider |
+| `dnssec-failed.org`, `internetsociety.org` | Not contacted; their names are the DNSSEC test pair sent to the resolvers above |
 | `ipwho.is`, `ipapi.co`, `freeipapi.com` | Your public IP on opening the GeoIP tool, and every IP or domain you look up |
 | `1.1.1.1`, `one.one.one.one`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets, and as the two halves of the resolver test |
 | `ipv4.icanhazip.com`, `ipv6.icanhazip.com`, `api4.ipify.org`, `api6.ipify.org` | Your IP, during the dual-stack check — each answers on one address family only |
@@ -230,6 +260,12 @@ CI runs all three on every push and pull request; deployment is gated on them pa
 ---
 
 ## 👏 Acknowledgments
+
+The DNS Resolver Benchmark exists because of **Steve Gibson's**
+[GRC DNS Benchmark](https://www.grc.com/dns/benchmark.htm), which has been measuring nameservers
+properly — over UDP, against their actual IP addresses — since 2010. The cached / uncached /
+"dotcom" separation, the NXDOMAIN-redirection check and the plain-English conclusions are all his
+design; NetReady reproduces what a browser honestly can and says plainly where it cannot follow.
 
 [Lucide](https://lucide.dev/) · [Tailwind CSS](https://tailwindcss.com/) ·
 [Vite](https://vitejs.dev/) · [React](https://react.dev/) · [Leaflet](https://leafletjs.com/) ·

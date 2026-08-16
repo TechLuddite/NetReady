@@ -5,7 +5,7 @@ import type {
   IntegrityProbe,
   MeasurementFailure,
 } from '../types';
-import { createId, queryDnsOverHttps } from './network';
+import { createId, queryDnsOverHttps, timeoutSignal } from './network';
 
 /**
  * Captive-portal and DNS-hijack detection.
@@ -102,20 +102,6 @@ function hasJsonKey(body: string, key: string): boolean {
   } catch {
     return false;
   }
-}
-
-function timeoutSignal(ms: number, external?: AbortSignal): { signal: AbortSignal; done: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  const onAbort = () => controller.abort();
-  external?.addEventListener('abort', onAbort);
-  return {
-    signal: controller.signal,
-    done: () => {
-      clearTimeout(timer);
-      external?.removeEventListener('abort', onAbort);
-    },
-  };
 }
 
 /** True when the current page may open plaintext http: connections. */

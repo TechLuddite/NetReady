@@ -26,6 +26,7 @@ import {
   Stethoscope,
   Network,
   ShieldQuestion,
+  Timer,
 } from 'lucide-react';
 import { HistoryItem } from '../types';
 import {
@@ -76,6 +77,8 @@ export const ExportPage: React.FC<ExportPageProps> = ({ onHistoryUpdate }) => {
         return <Radar className={`${className} text-rose-400`} />;
       case 'dns':
         return <Globe className={`${className} text-blue-400`} />;
+      case 'dnsbench':
+        return <Timer className={`${className} text-sky-400`} />;
       case 'webrtc':
         return <ShieldCheck className={`${className} text-purple-400`} />;
       case 'httpprobe':

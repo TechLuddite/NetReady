@@ -10,6 +10,7 @@ export type ToolTab =
   | 'speedtest'
   | 'ping'
   | 'dns'
+  | 'dnsbench'
   | 'webrtc'
   | 'cidr'
   | 'mac'
@@ -566,6 +567,121 @@ export interface DnsIntegrityResult {
   failures: MeasurementFailure[];
 }
 
+// ---------------------------------------------------------------------------
+// DNS resolver benchmark
+//
+// Inspired by Steve Gibson's GRC DNS Benchmark, which measures DNS over UDP
+// against a nameserver's IP address, separating cached, uncached and "dotcom"
+// lookups. A browser cannot do that: no raw sockets, no way to learn the system
+// resolver's address, and no way to read the phase breakdown of a cross-origin
+// request. What it *can* do is time RFC 8484 DNS-over-HTTPS queries to public
+// resolvers that permit cross-origin reads.
+//
+// Every millisecond in these types is therefore a full HTTPS round trip — TLS,
+// HTTP framing and the operator's front-end included. It is not "DNS lookup
+// time", and nothing in this file or its UI calls it that. The system/ISP
+// resolver, the one most users actually want measured, cannot be benchmarked
+// from a web page at all; that is stated in the UI rather than approximated.
+// ---------------------------------------------------------------------------
+
+/** The three lookup kinds GRC's benchmark separates, and why each is distinct:
+ *  a resolver can be fast from cache and slow to reach the wider internet. */
+export type DnsProbeKind = 'cached' | 'uncached' | 'dotcom';
+
+export interface DnsMetricSummary {
+  /** Queries that produced a readable DNS response. Deliberately not called
+   *  "reliability": over HTTPS a failed request may be the resolver, the
+   *  network, an extension or TLS, and a browser cannot tell them apart. */
+  answered: number;
+  attempted: number;
+  medianMs: number | null;
+  /** Null below ten samples — see `summariseSamples` in network.ts. */
+  p95Ms: number | null;
+  minMs: number | null;
+  maxMs: number | null;
+  stdDevMs: number | null;
+}
+
+/** What a resolver did when asked for a name that provably does not exist.
+ *  `answers-with-an-address` is deliberately neutral: the observation is that
+ *  an address came back, not why. */
+export type NxdomainHonesty = 'honest' | 'answers-with-an-address' | 'inconclusive';
+
+export type DnssecValidation = 'validates' | 'does-not-validate' | 'inconclusive';
+
+export type ResolverOutcome =
+  | 'measured'
+  | 'partially-measured'
+  | 'no-readable-answer'
+  | 'blocked-by-browser'
+  | 'not-attempted';
+
+export interface ResolverBenchmark {
+  resolverId: string;
+  label: string;
+  operator: string;
+  endpoint: string;
+  /** The operator's published filtering policy, quoted for context. Not
+   *  measured, and no verdict is derived from it. */
+  policyNote: string;
+  cached: DnsMetricSummary;
+  uncached: DnsMetricSummary;
+  dotcom: DnsMetricSummary;
+  /**
+   * Uncached median minus cached median, for this resolver only.
+   *
+   * Both halves went to the same endpoint over the same connection, so the
+   * constant HTTPS transport cost largely cancels and what remains is closer to
+   * the resolver's own cost of leaving its cache. It is a difference of two
+   * medians, not the median of paired differences, so it cancels the *typical*
+   * transport cost rather than any single query's.
+   *
+   * Null when either median is null. May be negative — a "cached" name whose
+   * TTL had expired at that anycast node produces exactly that — and the
+   * negative is reported. Clamping it to zero would be substituting a value for
+   * a measurement.
+   */
+  uncachedCostMs: number | null;
+  nxdomainHonesty: NxdomainHonesty;
+  nxdomainDetail: string;
+  /** Null when DNSSEC checking was switched off for the run, which is not the
+   *  same as having checked and been unable to tell. */
+  dnssec: DnssecValidation | null;
+  dnssecDetail: string;
+  outcome: ResolverOutcome;
+  note: string;
+}
+
+export interface DnsBenchmarkResult {
+  id: string;
+  timestamp: number;
+  resolvers: ResolverBenchmark[];
+  samplesPerMetric: number;
+  /** The popular names used for the cached measurement, so a reader can see
+   *  what was actually asked for. */
+  namesQueried: string[];
+  dnssecRequested: boolean;
+  /**
+   * Whether the browser could read the DNS/TCP/TLS phase breakdown of these
+   * requests. Observed from the Resource Timing entries rather than asserted:
+   * no DoH endpoint currently sends `Timing-Allow-Origin`, but that is a fact
+   * about today's deployments, not a law, so it is re-checked each run. Null
+   * when no timing entry was readable at all.
+   */
+  phaseTimingsAvailable: boolean | null;
+  fastestCachedResolverId: string | null;
+  /** True when the fastest resolver's observed range overlaps the runner-up's,
+   *  i.e. this run does not separate them. Null when there is no runner-up. */
+  fastestIsWithinNoise: boolean | null;
+  verdict: 'measured' | 'partial' | 'nothing-measured' | null;
+  explanation: string;
+  /** Plain-English findings, in the spirit of GRC's "Conclusions" tab. Empty
+   *  when nothing was measured — silence is not a clean bill of health. */
+  conclusions: string[];
+  totalTimeMs: number;
+  failures: MeasurementFailure[];
+}
+
 export interface HistoryItem {
   id: string;
   type:
@@ -583,7 +699,8 @@ export interface HistoryItem {
     | 'edgepath'
     | 'triage'
     | 'dualstack'
-    | 'captive';
+    | 'captive'
+    | 'dnsbench';
   timestamp: number;
   title: string;
   summary: string;
