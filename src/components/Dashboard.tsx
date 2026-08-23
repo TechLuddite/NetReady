@@ -37,7 +37,6 @@ import { displayMetric } from './MetricValue';
 import { BottleneckSummary } from './BottleneckSummary';
 import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
-import { TrafficMonitor } from './TrafficMonitor';
 
 /**
  * One category readiness bar. A category with no measurement behind it shows an
@@ -368,9 +367,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Real-Time PerformanceObserver Traffic Monitor Sparklines */}
-      <TrafficMonitor />
 
       {/* Tool Launch Grid */}
       <div>

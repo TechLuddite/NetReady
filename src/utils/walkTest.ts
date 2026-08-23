@@ -60,7 +60,35 @@ export const PROBE_TIMEOUT_MS = 5000;
  *  enough that the tool is not itself the load. */
 export const DEFAULT_INTERVAL_MS = 3000;
 
-export const INTERVAL_CHOICES = [2000, 3000, 5000, 10000] as const;
+/**
+ * Gap between rounds, not a fixed cadence: the loop waits for every destination
+ * in a round to answer or time out before it starts the timer. A round in which
+ * everything times out therefore takes `PROBE_TIMEOUT_MS`, and the effective
+ * tick stretches to match rather than requests piling up on a struggling link.
+ * That is what makes the one-second option safe.
+ */
+export const INTERVAL_CHOICES = [1000, 2000, 3000, 5000, 10000] as const;
+
+/**
+ * Rounds discarded from every timing statistic and every chart at the start of
+ * a walk.
+ *
+ * The first probe to each destination pays for DNS, TCP and TLS, and the second
+ * often still pays for a cold path somewhere upstream. Left in, those rounds set
+ * the top of the chart's y-axis for the rest of the session, so the real
+ * measurements are squashed into a flat line near the bottom and the graph never
+ * recovers. They are counted, kept, and shown as discarded rather than deleted,
+ * because a destination that failed during warm-up still failed.
+ */
+export const WARMUP_ROUNDS = 2;
+
+/**
+ * Rounds visible in the live charts. A single bad spike would otherwise hold the
+ * y-axis at its height for the rest of the walk. The tables and the saved record
+ * always cover the whole walk; this trims the view, not the data, and the chart
+ * says which window it is showing.
+ */
+export const CHART_WINDOW_ROUNDS = 60;
 
 /**
  * Raw samples kept in the saved record.
@@ -117,14 +145,6 @@ export const WALK_TARGETS: readonly WalkTarget[] = [
     note: 'Netflix’s web front door. Playback runs on Open Connect appliances a browser cannot address.',
   },
   {
-    id: 'meta',
-    label: 'Facebook',
-    category: 'consumer',
-    host: 'www.facebook.com',
-    url: 'https://www.facebook.com/robots.txt',
-    note: 'Meta’s edge, which also fronts Instagram and WhatsApp Web.',
-  },
-  {
     id: 'amazon',
     label: 'Amazon',
     category: 'consumer',
@@ -175,6 +195,18 @@ export const WALK_TARGETS: readonly WalkTarget[] = [
     url: 'https://slack.com/robots.txt',
     note: 'Slack’s web edge. The message socket is a separate WebSocket host.',
   },
+  {
+    id: 'atlassian',
+    label: 'Atlassian',
+    category: 'business',
+    host: 'www.atlassian.com',
+    url: 'https://www.atlassian.com/robots.txt',
+    note:
+      'Jira and Confluence. Replaced Facebook here because Meta domains sit on most ad and ' +
+      'tracker blocklists, so that row failed for people whose network was fine — a false alarm ' +
+      'is worse than no row. Atlassian also rides a different edge network from anything else ' +
+      'in this list, which is worth having.',
+  },
 ];
 
 /** Blank summary, used when a destination has produced nothing yet. Every
@@ -202,7 +234,9 @@ export async function probeWalkTarget(
   options: {
     round: number;
     waypointId: string;
-    connectionSetup: boolean;
+    /** Whether this is the first probe to this destination that comes back. Set
+     *  by the caller once the outcome is known — see `runWalkLoop`. */
+    connectionSetup?: boolean;
     signal?: AbortSignal | undefined;
   },
 ): Promise<WalkSample> {
@@ -216,7 +250,7 @@ export async function probeWalkTarget(
     waypointId: options.waypointId,
     round: options.round,
     timestamp: Date.now(),
-    connectionSetup: options.connectionSetup,
+    connectionSetup: options.connectionSetup === true,
   };
 
   try {
@@ -258,7 +292,11 @@ export interface WalkLoopOptions {
 export async function runWalkLoop(options: WalkLoopOptions): Promise<void> {
   const targets = options.targets ?? WALK_TARGETS;
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const contacted = new Set<string>();
+  // Destinations whose first answer has already come back. The handshake cost
+  // sits in the first probe that *completes*, not the first one attempted: a
+  // destination that is unreachable for twenty rounds and then answers pays for
+  // DNS, TCP and TLS on round twenty-one, and that sample has to be flagged.
+  const connected = new Set<string>();
   let round = 0;
 
   while (!options.signal.aborted) {
@@ -266,15 +304,17 @@ export async function runWalkLoop(options: WalkLoopOptions): Promise<void> {
     const waypointId = options.currentWaypointId();
 
     const samples = await Promise.all(
-      targets.map((target) => {
-        const connectionSetup = !contacted.has(target.id);
-        contacted.add(target.id);
-        return probeWalkTarget(target, {
+      targets.map(async (target) => {
+        const sample = await probeWalkTarget(target, {
           round,
           waypointId,
-          connectionSetup,
           signal: options.signal,
         });
+        if (sample.outcome === 'answered' && !connected.has(target.id)) {
+          connected.add(target.id);
+          return { ...sample, connectionSetup: true };
+        }
+        return sample;
       }),
     );
 
@@ -295,12 +335,23 @@ export async function runWalkLoop(options: WalkLoopOptions): Promise<void> {
   }
 }
 
-/** Samples that count towards timing statistics: answered, and not the
- *  connection-setup sample that carries DNS, TCP and TLS inside it. */
+/**
+ * Whether a sample's timing is usable as a steady-state measurement.
+ *
+ * Two exclusions, both about connection setup rather than about the network:
+ * the opening `WARMUP_ROUNDS` of the walk, and the first probe each destination
+ * answers, which is where its DNS, TCP and TLS cost lands. Exported because the
+ * charts must draw exactly what the statistics count, or the picture and the
+ * table disagree.
+ */
+export const isSteadyState = (sample: WalkSample): boolean =>
+  sample.outcome === 'answered' &&
+  sample.roundTripMs !== null &&
+  !sample.connectionSetup &&
+  sample.round > WARMUP_ROUNDS;
+
 const steadyStateTimings = (samples: readonly WalkSample[]): number[] =>
-  samples
-    .filter((s) => s.outcome === 'answered' && !s.connectionSetup && s.roundTripMs !== null)
-    .map((s) => s.roundTripMs as number);
+  samples.filter(isSteadyState).map((s) => s.roundTripMs as number);
 
 /**
  * Per-destination statistics over a set of samples.
@@ -576,9 +627,11 @@ export function buildWalkResult(input: {
         reason: 'insufficient-samples',
         detail:
           `${stats.label} produced ${stats.summary.answered} answer` +
-          `${stats.summary.answered === 1 ? '' : 's'}, and the first one against each ` +
-          `destination is set aside because it includes DNS and TLS setup. At least ` +
-          `${MIN_SAMPLES_FOR_SUMMARY} later answers are needed before a median is reported.`,
+          `${stats.summary.answered === 1 ? '' : 's'}, and two of those are set aside: the ` +
+          `opening ${WARMUP_ROUNDS} rounds of the walk, and the first answer from this ` +
+          `destination, both of which carry DNS and TLS setup. At least ` +
+          `${MIN_SAMPLES_FOR_SUMMARY} steady-state answers are needed before a median is ` +
+          'reported.',
       });
     }
   }

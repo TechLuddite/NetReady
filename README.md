@@ -89,9 +89,10 @@ by design and would manufacture findings out of geography.
 
 ### 🚶 Walk & Test — *survey the building, not just the connection*
 
-Ten destinations people actually depend on — Google, YouTube, Netflix, Facebook and Amazon on the
-consumer side; Microsoft 365, Teams, Zoom, Salesforce and Slack on the business side — probed round
-after round while you walk the building. Name the spot you are standing in, wait for a few rounds,
+Ten destinations people actually depend on — Google, YouTube, Netflix and Amazon on the consumer
+side; Microsoft 365, Teams, Zoom, Salesforce, Slack and Atlassian on the business side — probed
+round after round while you walk the building. Each gets a card with its own sparkline, and all the
+sparklines share one scale so the shapes are comparable at a glance. Name the spot you are standing in, wait for a few rounds,
 move, name the next one. The result is a **per-spot comparison**: which corner of the office loses
 Teams, where the round trips double, which dead spot is a dead spot for everything and which is
 only bad for one destination.
@@ -111,12 +112,18 @@ What the numbers are, stated permanently on screen rather than in a footnote:
 - **These are front doors, not backends.** Netflix playback, Teams call audio and Zoom media run
   over paths a browser cannot address, so a green row does not promise a smooth call.
 - **Unanswered is not "down", and it is not packet loss.** A timeout, a refused connection, a failed
-  lookup and being out of range look identical to a browser. The column is called *Answered*.
+  lookup and being out of range look identical to a browser. So does a blocklist: an ad blocker or a
+  filtering resolver makes a healthy network look like a dead spot for one destination. The counter
+  is called *Answered* for that reason, and it is why Meta domains are deliberately not in the list.
 - **All ten fire at once each round**, which gives them the same instant — and makes them compete
   on a constrained link. Compare rows and spots to each other, not a single figure to a spec sheet.
 
-Each destination's first probe pays for DNS, TCP and TLS, so it is counted but kept out of the
-timing statistics. Spots are compared by the **median of each destination's own median**, over only
+The opening two rounds and each destination's first answer pay for DNS, TCP and TLS, so they are
+counted but kept out of every timing statistic and every chart. Left in, they pinned the top of the
+y-axis near a second for the rest of the session and flattened every real measurement into a line
+along the bottom. Rounds fire every 1, 2, 3, 5 or 10 seconds; the interval is the pause *between*
+rounds, and a round waits for all ten destinations to answer or time out first, so a struggling link
+stretches the gap rather than piling requests up. Spots are compared by the **median of each destination's own median**, over only
 the destinations that produced a median at *every* spot — pooling raw samples instead would make the
 figure lurch when a destination dropped out, reporting a change in which destinations answered as
 though it were a change in latency.
@@ -197,10 +204,7 @@ Handshake timing and application-layer echo round-trips over `ws://` and `wss://
 ### 10. 🧭 GeoIP & ISP Inspector
 Geolocation, ISP, ASN and proxy/VPN signals for an IP or domain, via third-party lookup providers.
 
-### 11. 📊 Live Traffic Monitor
-Real-time throughput and latency from the browser's own Performance Timeline.
-
-### 12. 🧭 Edge Path Explorer
+### 11. 🧭 Edge Path Explorer
 Everything a browser can genuinely observe about the path to a host:
 
 - **Connection phase breakdown** — real DNS → TCP → TLS → time-to-first-byte → transfer timings
@@ -215,7 +219,7 @@ Everything a browser can genuinely observe about the path to a host:
   how far away a server can be. Drawn as a constraint circle: the endpoint is somewhere inside it.
   This is a proof, not an estimate — queuing delay only loosens the bound.
 
-### 13. 🗺️ Route Model *(simulated — read this)*
+### 12. 🗺️ Route Model *(simulated — read this)*
 Resolves a target, looks up its real location, and draws a plausible great-circle path to it.
 
 **The intermediate hops are generated, not measured.** Browsers cannot send ICMP packets or set an
@@ -223,7 +227,7 @@ IP TTL, so no web page can perform a real traceroute. The first and last hops ar
 DNS resolution and a real geolocation lookup; everything between them is illustrative. Exports mark
 these records as simulated. Use the Edge Path Explorer above for measurements you can rely on.
 
-### 14. 💾 History & Export
+### 13. 💾 History & Export
 Results persist in `localStorage`. Search, filter, inspect raw JSON, and export per-tool CSVs, a
 master summary, or a bundled ZIP with a manifest.
 
@@ -268,9 +272,9 @@ without touching it, so the following go directly from your browser to third par
 | `1.1.1.1`, `one.one.one.one`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets, and as the two halves of the resolver test |
 | `ipv4.icanhazip.com`, `ipv6.icanhazip.com`, `api4.ipify.org`, `api6.ipify.org` | Your IP, during the dual-stack check — each answers on one address family only |
 | `cp.cloudflare.com` | Your IP, during the captive-portal check, and only when NetReady is opened over plain `http` |
-| `www.google.com`, `www.youtube.com`, `www.netflix.com`, `www.facebook.com`, `www.amazon.com`, `outlook.office365.com`, `teams.microsoft.com`, `zoom.us`, `login.salesforce.com`, `slack.com` | Your IP, once per round for the length of a Walk & Test run — roughly 200 requests each over ten minutes. One HEAD for a small public file, no cookies sent |
+| `www.google.com`, `www.youtube.com`, `www.netflix.com`, `www.amazon.com`, `outlook.office365.com`, `teams.microsoft.com`, `zoom.us`, `login.salesforce.com`, `slack.com`, `www.atlassian.com` | Your IP, once per round for the length of a Walk & Test run — up to ~600 requests each over ten minutes at the one-second interval. One HEAD for a small public file, no cookies sent |
+| `api.github.com`, `httpbin.org`, `cloudflare.com`, `dns.google` | Your IP, if you run the HTTP probe against one of its one-click sample targets |
 | `stun.l.google.com` and other STUN servers | Your public IP, and potentially local addresses |
-| `httpbin.org` | Your IP, only when you press "Trigger Network Spike" on the live traffic monitor |
 | `basemaps.cartocdn.com`, `openstreetmap.org` | Map areas you view, revealing an approximate target location |
 | Hosts you enter | Direct connections from your browser — that is what a probe *is* |
 
