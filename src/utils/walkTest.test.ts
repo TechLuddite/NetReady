@@ -4,6 +4,7 @@ import {
   DEFAULT_INTERVAL_MS,
   INTERVAL_CHOICES,
   MAX_STORED_SAMPLES,
+  SUB_SECOND_INTERVAL_MS,
   WALK_TARGETS,
   WARMUP_ROUNDS,
   buildWalkConclusions,
@@ -485,10 +486,21 @@ describe('WALK_TARGETS', () => {
 });
 
 describe('INTERVAL_CHOICES', () => {
-  it('offers a one-second tick', () => {
-    // Safe because the loop awaits a whole round before starting the timer, so
-    // the interval is a gap between rounds rather than a fixed cadence.
+  it('offers sub-second ticks', () => {
+    // Safe for the browser because the loop awaits a whole round before starting
+    // the timer, so the interval is a gap between rounds rather than a fixed
+    // cadence and requests cannot pile up. Measured at 0.306s per round at a
+    // 250ms gap, flat from the first round to the four-thousandth.
+    expect(INTERVAL_CHOICES).toContain(250);
+    expect(INTERVAL_CHOICES).toContain(500);
     expect(INTERVAL_CHOICES).toContain(1000);
+  });
+
+  it('flags exactly the choices that generate sustained third-party traffic', () => {
+    // Safe for the browser is not the same as polite to ten other people's
+    // servers, and the UI warns on the second question, not the first.
+    const flagged = INTERVAL_CHOICES.filter((ms) => ms <= SUB_SECOND_INTERVAL_MS);
+    expect(flagged).toEqual([250, 500]);
   });
 
   it('is ordered fastest first and holds the default', () => {

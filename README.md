@@ -121,9 +121,16 @@ What the numbers are, stated permanently on screen rather than in a footnote:
 The opening two rounds and each destination's first answer pay for DNS, TCP and TLS, so they are
 counted but kept out of every timing statistic and every chart. Left in, they pinned the top of the
 y-axis near a second for the rest of the session and flattened every real measurement into a line
-along the bottom. Rounds fire every 1, 2, 3, 5 or 10 seconds; the interval is the pause *between*
-rounds, and a round waits for all ten destinations to answer or time out first, so a struggling link
-stretches the gap rather than piling requests up. Spots are compared by the **median of each destination's own median**, over only
+along the bottom. Rounds fire every 0.25, 0.5, 1, 2, 3, 5 or 10 seconds; the interval is the
+pause *between* rounds, and a round waits for all ten destinations to answer or time out first, so a
+struggling link stretches the gap rather than piling requests up. That back-pressure is what makes
+the sub-second settings safe for the browser: measured at **0.306 s per round** at a 250 ms gap, flat
+from the first round to the four-thousandth sample.
+
+Safe for the browser is not the same as polite to ten other people's servers, so choosing 0.25 s or
+0.5 s raises a notice saying what it costs — up to roughly 2,000 requests to each destination over
+ten minutes, and a destination whose bot protection starts refusing will show up as a dead card when
+it is really a rate limit. It is for a short sweep of a problem area, not a whole building. Spots are compared by the **median of each destination's own median**, over only
 the destinations that produced a median at *every* spot — pooling raw samples instead would make the
 figure lurch when a destination dropped out, reporting a change in which destinations answered as
 though it were a change in latency.

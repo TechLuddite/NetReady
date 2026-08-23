@@ -37,6 +37,7 @@ import {
   INTERVAL_CHOICES,
   MAX_STORED_SAMPLES,
   PROBE_TIMEOUT_MS,
+  SUB_SECOND_INTERVAL_MS,
   WALK_TARGETS,
   WARMUP_ROUNDS,
   buildWalkConclusions,
@@ -618,6 +619,24 @@ export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate }) => {
             </span>
           )}
         </div>
+
+        {/* Not a warning about the browser, which copes. A warning about what
+            this sends to ten other people's servers. */}
+        {intervalMs <= SUB_SECOND_INTERVAL_MS && (
+          <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 text-[11px] text-amber-100 leading-relaxed">
+            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              At {intervalMs / 1000}s this stops sampling these ten services and starts putting
+              sustained traffic on them: up to about{' '}
+              {(Math.round(600 / ((intervalMs + 50) / 1000) / 100) * 100).toLocaleString()} requests
+              to each over ten minutes, fewer on a slow link because each round waits for the
+              previous one. The browser copes, and the loop waits for each round to finish so it
+              cannot pile requests up. Their bot protection is the thing to watch — a destination
+              that starts refusing will show here as a dead card when it is really a rate limit.
+              Use it for a short sweep of a problem area, not for a whole building.
+            </span>
+          </div>
+        )}
 
         {/* The one control that has to be reachable one-handed, mid-walk. */}
         {isWalking && (
