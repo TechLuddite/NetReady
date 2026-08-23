@@ -65,9 +65,14 @@ export const DEFAULT_INTERVAL_MS = 3000;
  * in a round to answer or time out before it starts the timer. A round in which
  * everything times out therefore takes `PROBE_TIMEOUT_MS`, and the effective
  * tick stretches to match rather than requests piling up on a struggling link.
- * That is what makes the one-second option safe.
+ * That back-pressure is what makes the sub-second options safe for the browser.
+ *
+ * It does not make them polite. At a quarter-second gap a ten-minute walk is
+ * well over a thousand requests to each of ten third parties, which is a
+ * different kind of cost from the one the browser pays — see
+ * `SUB_SECOND_INTERVAL_MS` and the notice the UI shows when one is selected.
  */
-export const INTERVAL_CHOICES = [1000, 2000, 3000, 5000, 10000] as const;
+export const INTERVAL_CHOICES = [250, 500, 1000, 2000, 3000, 5000, 10000] as const;
 
 /**
  * Rounds discarded from every timing statistic and every chart at the start of
@@ -81,6 +86,19 @@ export const INTERVAL_CHOICES = [1000, 2000, 3000, 5000, 10000] as const;
  * because a destination that failed during warm-up still failed.
  */
 export const WARMUP_ROUNDS = 2;
+
+/**
+ * At or below this gap, the walk is generating sustained traffic to ten third
+ * parties rather than sampling them, and the UI says so.
+ *
+ * A quarter-second gap resolves to roughly three rounds a second once each
+ * round's own duration is added, so ten minutes is on the order of 1,800
+ * requests per destination. Nothing breaks, and several of these operators run
+ * bot protection that may reasonably start refusing — which would then show up
+ * on the cards as a dead destination that is really a rate limit. Worth
+ * knowing before reading the result.
+ */
+export const SUB_SECOND_INTERVAL_MS = 500;
 
 /**
  * Rounds visible in the live charts. A single bad spike would otherwise hold the
