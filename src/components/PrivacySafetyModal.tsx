@@ -63,6 +63,18 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
       'http. A page served over https cannot make this request at all.',
   },
   {
+    host:
+      'www.google.com, www.youtube.com, www.netflix.com, www.facebook.com, www.amazon.com, ' +
+      'outlook.office365.com, teams.microsoft.com, zoom.us, login.salesforce.com, slack.com',
+    receives:
+      'Your IP, repeatedly, for as long as a Walk & Test run lasts — every one of them is probed ' +
+      'once per round, so a ten-minute walk at the default interval is roughly two hundred ' +
+      'requests to each. Each request is a HEAD for one small public file and carries no cookies ' +
+      '(`credentials: \'omit\'`), so these hosts see an address and a TLS handshake rather than a ' +
+      'logged-in user. Several of them are advertising businesses; the IP and the timing pattern ' +
+      'are still theirs to log.',
+  },
+  {
     host: 'stun.l.google.com (and other STUN servers)',
     receives: 'Your public IP, and potentially local network addresses, during WebRTC analysis.',
   },

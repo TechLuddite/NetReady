@@ -26,6 +26,7 @@ import {
   Network,
   ShieldQuestion,
   Timer,
+  Footprints,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo } from '../types';
 import { PrivacySafetyModal } from './PrivacySafetyModal';
@@ -55,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const tabs: { id: ToolTab; label: string; icon: React.FC<{ className?: string }>; badge?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
+    { id: 'walktest', label: 'Walk & Test', icon: Footprints, badge: 'NEW' },
     { id: 'triage', label: 'Me or the Internet?', icon: Stethoscope, badge: 'NEW' },
     { id: 'dualstack', label: 'IPv4 / IPv6', icon: Network, badge: 'NEW' },
     { id: 'captive', label: 'Portal & DNS Hijack', icon: ShieldQuestion, badge: 'NEW' },

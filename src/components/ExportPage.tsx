@@ -27,6 +27,7 @@ import {
   Network,
   ShieldQuestion,
   Timer,
+  Footprints,
 } from 'lucide-react';
 import { HistoryItem } from '../types';
 import {
@@ -95,6 +96,8 @@ export const ExportPage: React.FC<ExportPageProps> = ({ onHistoryUpdate }) => {
         return <Network className={`${className} text-indigo-400`} />;
       case 'captive':
         return <ShieldQuestion className={`${className} text-amber-400`} />;
+      case 'walktest':
+        return <Footprints className={`${className} text-teal-400`} />;
       default:
         return <FileSpreadsheet className={`${className} text-slate-400`} />;
     }

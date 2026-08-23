@@ -1,5 +1,6 @@
 export type ToolTab =
   | 'dashboard'
+  | 'walktest'
   | 'triage'
   | 'dualstack'
   | 'captive'
@@ -682,6 +683,144 @@ export interface DnsBenchmarkResult {
   failures: MeasurementFailure[];
 }
 
+// ---------------------------------------------------------------------------
+// Walk & Test
+//
+// Repeated reachability probes to a fixed set of well-known destinations, tagged
+// with the spot the phone was standing in when they were taken. After Richard
+// Astbury's Azure Speed Test, which times a fixed list of regions over and over
+// and lets the table settle — except that here you are expected to move between
+// readings, so the deliverable is a comparison between spots rather than one
+// figure for "the network".
+//
+// Every millisecond below is a full HTTPS request round trip to the
+// destination's nearest edge, measured with `no-cors`. That means the response
+// is opaque by construction: a completed request proves the edge answered and
+// how long it took, and says nothing whatsoever about what it answered. There is
+// no ICMP ping available to a web page and nothing here pretends otherwise.
+// ---------------------------------------------------------------------------
+
+export type WalkCategory = 'consumer' | 'business';
+
+export interface WalkTarget {
+  id: string;
+  label: string;
+  category: WalkCategory;
+  host: string;
+  /** Small, unauthenticated resource fetched to elicit the round trip. */
+  url: string;
+  /** What this endpoint actually is, shown on screen so a reader can judge the
+   *  number rather than take the brand name for the whole service. */
+  note: string;
+}
+
+/** `no-response` covers a timeout, a refused connection, a failed name lookup
+ *  and being out of range. A browser cannot separate them, so neither does this
+ *  — and it is deliberately not called packet loss, which would imply an ICMP
+ *  measurement that never happened. */
+export type WalkProbeOutcome = 'answered' | 'no-response';
+
+export interface WalkSample {
+  targetId: string;
+  waypointId: string;
+  /** 1-based round number. Every destination is probed once per round. */
+  round: number;
+  timestamp: number;
+  /** null when nothing came back — never 0, which would read as instant. */
+  roundTripMs: number | null;
+  outcome: WalkProbeOutcome;
+  /**
+   * True for the first probe against this destination in this run, which pays
+   * for DNS, TCP and TLS on top of the round trip. It is kept and counted, and
+   * excluded from the timing statistics, the same way the DNS benchmark
+   * discards its warm-up query.
+   */
+  connectionSetup: boolean;
+}
+
+/** A place you stood still for a while. */
+export interface WalkWaypoint {
+  id: string;
+  label: string;
+  startedAt: number;
+  endedAt: number | null;
+  /**
+   * What `navigator.connection` claimed at the moment the spot was created.
+   * Reported by the browser, not measured by NetReady — it is coarse, it is
+   * optional, and Safari and Firefox do not implement it at all. Recorded as
+   * context for a reader, never used to fill in a missing measurement.
+   */
+  reportedConnectionType: string | null;
+  reportedEffectiveType: string | null;
+}
+
+/** Timing statistics over a set of samples. Same shape as the DNS benchmark's
+ *  summary, and for the same reason: the counts have to travel with the
+ *  statistics or a median from two answers looks like a median from two
+ *  hundred. */
+export interface WalkTimingSummary {
+  answered: number;
+  attempted: number;
+  /** Null below the minimum sample count — see `summariseSamples`. */
+  medianMs: number | null;
+  p95Ms: number | null;
+  minMs: number | null;
+  maxMs: number | null;
+  stdDevMs: number | null;
+}
+
+export interface WalkTargetStats {
+  targetId: string;
+  label: string;
+  category: WalkCategory;
+  summary: WalkTimingSummary;
+  /** Mean absolute change between consecutive answered probes. Null below two. */
+  jitterMs: number | null;
+  lastRoundTripMs: number | null;
+  lastOutcome: WalkProbeOutcome | null;
+}
+
+export interface WalkWaypointStats {
+  waypointId: string;
+  label: string;
+  attempted: number;
+  answered: number;
+  rounds: number;
+  perTarget: WalkTargetStats[];
+  /**
+   * Median of the per-destination medians, rather than a median over every
+   * sample pooled together. Pooling would make this figure move whenever a
+   * destination stopped answering, because the mix of destinations changed and
+   * not the network.
+   */
+  medianOfTargetMediansMs: number | null;
+  /** The destinations that contributed a median. Two spots are only comparable
+   *  over the destinations that produced one at both, so the pool travels with
+   *  the number. */
+  pooledTargetIds: string[];
+}
+
+export interface WalkTestResult {
+  id: string;
+  timestamp: number;
+  targets: WalkTarget[];
+  waypoints: WalkWaypoint[];
+  /** Most recent raw samples, capped for storage. Statistics are computed over
+   *  every sample before truncation; `samplesDropped` says how many are absent
+   *  from this record. */
+  samples: WalkSample[];
+  samplesDropped: number;
+  rounds: number;
+  perTarget: WalkTargetStats[];
+  perWaypoint: WalkWaypointStats[];
+  /** Plain-English findings. Empty when nothing was measured — silence is not a
+   *  clean bill of health. */
+  conclusions: string[];
+  intervalMs: number;
+  durationMs: number;
+  failures: MeasurementFailure[];
+}
+
 export interface HistoryItem {
   id: string;
   type:
@@ -700,7 +839,8 @@ export interface HistoryItem {
     | 'triage'
     | 'dualstack'
     | 'captive'
-    | 'dnsbench';
+    | 'dnsbench'
+    | 'walktest';
   timestamp: number;
   title: string;
   summary: string;

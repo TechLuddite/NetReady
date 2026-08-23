@@ -87,6 +87,40 @@ by design and would manufacture findings out of geography.
 
 ## 🛠️ Tools
 
+### 🚶 Walk & Test — *survey the building, not just the connection*
+
+Ten destinations people actually depend on — Google, YouTube, Netflix, Facebook and Amazon on the
+consumer side; Microsoft 365, Teams, Zoom, Salesforce and Slack on the business side — probed round
+after round while you walk the building. Name the spot you are standing in, wait for a few rounds,
+move, name the next one. The result is a **per-spot comparison**: which corner of the office loses
+Teams, where the round trips double, which dead spot is a dead spot for everything and which is
+only bad for one destination.
+
+The repeated-probe idea is [Richard Astbury's Azure Speed Test](https://richorama.github.io/AzureSpeedTest2/),
+which times a fixed list of regions until the table stops moving. This one expects you to move
+instead.
+
+What the numbers are, stated permanently on screen rather than in a footnote:
+
+- **Each figure is a full HTTPS request round trip, not a ping.** No raw sockets means no ICMP and
+  no lower-level timing. TLS on a new connection and the destination's own front-end are inside
+  every number.
+- **The requests are `no-cors`, so the response is opaque.** A completed probe proves the edge
+  answered and how long it took. A 200, a 403 and a login redirect are indistinguishable from here,
+  and the tool claims nothing about which it got.
+- **These are front doors, not backends.** Netflix playback, Teams call audio and Zoom media run
+  over paths a browser cannot address, so a green row does not promise a smooth call.
+- **Unanswered is not "down", and it is not packet loss.** A timeout, a refused connection, a failed
+  lookup and being out of range look identical to a browser. The column is called *Answered*.
+- **All ten fire at once each round**, which gives them the same instant — and makes them compete
+  on a constrained link. Compare rows and spots to each other, not a single figure to a spec sheet.
+
+Each destination's first probe pays for DNS, TCP and TLS, so it is counted but kept out of the
+timing statistics. Spots are compared by the **median of each destination's own median**, over only
+the destinations that produced a median at *every* spot — pooling raw samples instead would make the
+figure lurch when a destination dropped out, reporting a change in which destinations answered as
+though it were a change in latency.
+
 ### 1. ⚡ Speed & Bandwidth
 Streams real data over three concurrent connections against the Cloudflare edge, measuring
 throughput from bytes that actually moved. Reports download, upload, idle latency, jitter, latency
@@ -234,6 +268,7 @@ without touching it, so the following go directly from your browser to third par
 | `1.1.1.1`, `one.one.one.one`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets, and as the two halves of the resolver test |
 | `ipv4.icanhazip.com`, `ipv6.icanhazip.com`, `api4.ipify.org`, `api6.ipify.org` | Your IP, during the dual-stack check — each answers on one address family only |
 | `cp.cloudflare.com` | Your IP, during the captive-portal check, and only when NetReady is opened over plain `http` |
+| `www.google.com`, `www.youtube.com`, `www.netflix.com`, `www.facebook.com`, `www.amazon.com`, `outlook.office365.com`, `teams.microsoft.com`, `zoom.us`, `login.salesforce.com`, `slack.com` | Your IP, once per round for the length of a Walk & Test run — roughly 200 requests each over ten minutes. One HEAD for a small public file, no cookies sent |
 | `stun.l.google.com` and other STUN servers | Your public IP, and potentially local addresses |
 | `httpbin.org` | Your IP, only when you press "Trigger Network Spike" on the live traffic monitor |
 | `basemaps.cartocdn.com`, `openstreetmap.org` | Map areas you view, revealing an approximate target location |
@@ -266,6 +301,10 @@ The DNS Resolver Benchmark exists because of **Steve Gibson's**
 properly — over UDP, against their actual IP addresses — since 2010. The cached / uncached /
 "dotcom" separation, the NXDOMAIN-redirection check and the plain-English conclusions are all his
 design; NetReady reproduces what a browser honestly can and says plainly where it cannot follow.
+
+Walk & Test borrows its shape from **Richard Astbury's**
+[Azure Speed Test](https://richorama.github.io/AzureSpeedTest2/), which probes a fixed list of
+destinations over and over and lets the table settle rather than reporting one number and stopping.
 
 [Lucide](https://lucide.dev/) · [Tailwind CSS](https://tailwindcss.com/) ·
 [Vite](https://vitejs.dev/) · [React](https://react.dev/) · [Leaflet](https://leafletjs.com/) ·

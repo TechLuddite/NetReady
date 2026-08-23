@@ -9,6 +9,7 @@ import {
   generateDualStackCsv,
   generateCaptivePortalCsv,
   generateDnsBenchmarkCsv,
+  generateWalkTestCsv,
   TEST_TYPES,
 } from './export';
 import type { HistoryItem } from '../types';
@@ -495,6 +496,165 @@ describe('generateDnsBenchmarkCsv', () => {
   it('routes through the dispatcher and is a declared export type', () => {
     expect(getCsvForType([item([resolver()])], 'dnsbench')).toContain('Cloudflare');
     expect(TEST_TYPES.map((t) => t.id)).toContain('dnsbench');
+  });
+});
+
+describe('generateWalkTestCsv', () => {
+  const summary = (over: Record<string, unknown> = {}) => ({
+    answered: 6,
+    attempted: 6,
+    medianMs: 42,
+    p95Ms: null,
+    minMs: 38,
+    maxMs: 51,
+    stdDevMs: 4,
+    ...over,
+  });
+
+  const cell = (targetId: string, over: Record<string, unknown> = {}) => ({
+    targetId,
+    label: targetId === 'google' ? 'Google' : 'Microsoft 365',
+    category: targetId === 'google' ? 'consumer' : 'business',
+    summary: summary(),
+    jitterMs: 5,
+    lastRoundTripMs: 44,
+    lastOutcome: 'answered',
+    ...over,
+  });
+
+  const item = (over: Record<string, unknown> = {}): HistoryItem => ({
+    id: 'walk_1',
+    type: 'walktest',
+    timestamp: 1,
+    title: 't',
+    summary: 's',
+    data: {
+      targets: [
+        {
+          id: 'google',
+          label: 'Google',
+          category: 'consumer',
+          host: 'www.google.com',
+          url: 'https://www.google.com/generate_204',
+          note: '',
+        },
+        {
+          id: 'm365',
+          label: 'Microsoft 365',
+          category: 'business',
+          host: 'outlook.office365.com',
+          url: 'https://outlook.office365.com/robots.txt',
+          note: '',
+        },
+      ],
+      waypoints: [
+        {
+          id: 'w1',
+          label: 'Desk',
+          startedAt: 1,
+          endedAt: 2,
+          reportedConnectionType: 'wifi',
+          reportedEffectiveType: '4g',
+        },
+      ],
+      samples: [],
+      samplesDropped: 0,
+      rounds: 7,
+      intervalMs: 3000,
+      durationMs: 21_000,
+      perTarget: [cell('google'), cell('m365')],
+      perWaypoint: [
+        {
+          waypointId: 'w1',
+          label: 'Desk',
+          attempted: 14,
+          answered: 13,
+          rounds: 7,
+          perTarget: [cell('google'), cell('m365')],
+          medianOfTargetMediansMs: 42,
+          pooledTargetIds: ['google', 'm365'],
+        },
+      ],
+      conclusions: ['Everything answered at the desk.'],
+      failures: [],
+      ...over,
+    },
+  });
+
+  it('writes every field under the name the interface actually uses', () => {
+    // The guard against the six-columns-silently-blank class of bug: rename a
+    // field in types.ts and either the cast stops compiling or this fails.
+    const rows = generateWalkTestCsv([item()]).split('\n');
+    expect(rows).toHaveLength(3); // header + one row per destination per spot
+    expect(rows[1]).toContain('"Desk"');
+    expect(rows[1]).toContain('"Google"');
+    expect(rows[1]).toContain('"www.google.com"');
+    expect(rows[1]).toContain('"42"');
+    expect(rows[2]).toContain('"Microsoft 365"');
+    expect(rows[2]).toContain('"outlook.office365.com"');
+  });
+
+  it('leaves an unmeasured destination blank rather than exporting it as zero', () => {
+    // A dead spot would otherwise become the fastest cell in the spreadsheet.
+    const dead = {
+      ...cell('m365'),
+      summary: summary({
+        answered: 0,
+        attempted: 6,
+        medianMs: null,
+        minMs: null,
+        maxMs: null,
+        stdDevMs: null,
+      }),
+      jitterMs: null,
+      lastRoundTripMs: null,
+      lastOutcome: 'no-response',
+    };
+    const csv = generateWalkTestCsv([
+      item({
+        perTarget: [cell('google'), dead],
+        perWaypoint: [
+          {
+            waypointId: 'w1',
+            label: 'Desk',
+            attempted: 12,
+            answered: 6,
+            rounds: 6,
+            perTarget: [cell('google'), dead],
+            medianOfTargetMediansMs: 42,
+            pooledTargetIds: ['google'],
+          },
+        ],
+      }),
+    ]);
+    const row = csv.split('\n')[2];
+
+    expect(row).toContain('"Microsoft 365"');
+    expect(row).toContain('"0","6"'); // answered / attempted survive
+    expect(row).not.toContain('"0","0"'); // but no timing became a zero
+    // Median, min, max, p95, std dev and jitter are all empty cells.
+    expect(row.split(',').filter((c) => c === '""').length).toBeGreaterThanOrEqual(6);
+  });
+
+  it('still exports a row for a walk that measured nothing', () => {
+    const csv = generateWalkTestCsv([
+      item({
+        rounds: 0,
+        perTarget: [],
+        perWaypoint: [],
+        conclusions: [],
+        failures: [
+          { metric: 'google', reason: 'not-attempted', detail: 'Google was not probed.' },
+        ],
+      }),
+    ]);
+    const row = csv.split('\n')[1];
+    expect(row).toContain('google: Google was not probed.');
+  });
+
+  it('routes through the dispatcher and is a declared export type', () => {
+    expect(getCsvForType([item()], 'walktest')).toContain('Desk');
+    expect(TEST_TYPES.map((t) => t.id)).toContain('walktest');
   });
 });
 
