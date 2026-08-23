@@ -22,6 +22,8 @@ import {
   Network,
   ShieldQuestion,
   Timer,
+  Footprints,
+  MapPin,
 } from 'lucide-react';
 import { ToolTab, NetworkConnectionInfo, SpeedTestResult, PingResult, HistoryItem } from '../types';
 import {
@@ -377,6 +379,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Walk & Test — the only tool here that expects you to move */}
+          <div
+            onClick={() => setActiveTab('walktest')}
+            className="group bg-gradient-to-br from-teal-950/50 via-slate-900 to-slate-900 border border-teal-500/40 hover:border-teal-400 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-xl hover:shadow-teal-500/10 hover:-translate-y-0.5"
+          >
+            <div className="w-10 h-10 rounded-xl bg-teal-500 text-black flex items-center justify-center mb-3 shadow-[0_0_15px_rgba(20,184,166,0.4)]">
+              <Footprints className="w-5 h-5 stroke-[2.5]" />
+            </div>
+            <div className="flex items-center space-x-2 mb-1">
+              <h3 className="text-base font-bold text-white group-hover:text-teal-300 transition-colors">
+                Walk &amp; Test
+              </h3>
+              <span className="px-1.5 py-0.5 text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded uppercase">
+                New
+              </span>
+            </div>
+            <p className="text-xs text-slate-300 line-clamp-2">
+              Ten consumer and business destinations probed round after round while you walk the
+              building. Name each spot as you reach it and compare them side by side.
+            </p>
+            <div className="mt-4 flex items-center text-xs font-semibold text-teal-300 group-hover:translate-x-1 transition-transform">
+              <MapPin className="w-3.5 h-3.5 mr-1" />
+              <span>Survey the building</span>
+              <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            </div>
+          </div>
+
           {/* Triage — the answer layer */}
           <div
             onClick={() => setActiveTab('triage')}

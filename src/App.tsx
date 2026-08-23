@@ -4,6 +4,7 @@ import { getNetworkConnectionInfo } from './utils/network';
 import { getHistory, getLocalStorageSizeBytes } from './utils/storage';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
+import { WalkTest } from './components/WalkTest';
 import { TriagePanel } from './components/TriagePanel';
 import { DualStackCheck } from './components/DualStackCheck';
 import { DnsBenchmark } from './components/DnsBenchmark';
@@ -83,6 +84,8 @@ export default function App() {
             onHistoryUpdate={refreshHistory}
           />
         )}
+
+        {activeTab === 'walktest' && <WalkTest onHistoryUpdate={refreshHistory} />}
 
         {activeTab === 'triage' && <TriagePanel onHistoryUpdate={refreshHistory} />}
 

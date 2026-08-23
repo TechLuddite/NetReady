@@ -11,10 +11,12 @@ import type {
   DnsBenchmarkResult,
   CaptivePortalResult,
   DnsIntegrityResult,
+  WalkTestResult,
 } from '../types';
 import type { TriageVerdict } from '../analysis/types';
 
 export const TEST_TYPES = [
+  { id: 'walktest', label: 'Walk & Test Surveys', filename: 'walktest_results.csv', icon: 'Footprints' },
   { id: 'triage', label: 'Network Triage Verdicts', filename: 'triage_results.csv', icon: 'Stethoscope' },
   { id: 'dualstack', label: 'IPv4 / IPv6 Reachability', filename: 'dualstack_results.csv', icon: 'Network' },
   { id: 'dnsbench', label: 'DNS Resolver Benchmark', filename: 'dnsbench_results.csv', icon: 'Timer' },
@@ -769,6 +771,126 @@ export function generateDnsBenchmarkCsv(items: HistoryItem[]): string {
 }
 
 /**
+ * Walk & Test CSV — one row per spot per destination.
+ *
+ * That shape is deliberate: the point of a walk survey is comparing the same
+ * destination between two places, and a spreadsheet pivot over these rows gives
+ * exactly that. The whole-walk figures repeat on every row so a filtered view
+ * still carries its context.
+ *
+ * Every millisecond column is an HTTPS request round trip, and the headers say
+ * so. Absent figures are blank, never zero — a destination that never answered
+ * at a dead spot would otherwise export as the fastest cell in the file.
+ */
+export function generateWalkTestCsv(items: HistoryItem[]): string {
+  const headers = [
+    'Test ID',
+    'Timestamp',
+    'Date',
+    'Rounds',
+    'Interval (s)',
+    'Duration (s)',
+    'Spot',
+    'Spot Rounds',
+    'Spot Answered',
+    'Spot Attempted',
+    'Spot Median of Destination Medians (ms)',
+    'Browser-Reported Connection Type',
+    'Browser-Reported Effective Type',
+    'Destination',
+    'Kind',
+    'Host',
+    'Median HTTPS Round Trip (ms)',
+    'Min (ms)',
+    'Max (ms)',
+    'p95 (ms)',
+    'Std Dev (ms)',
+    'Jitter (ms)',
+    'Answered',
+    'Attempted',
+    'Whole-Walk Median (ms)',
+    'Whole-Walk Answered',
+    'Whole-Walk Attempted',
+    'Conclusions',
+    'Not Measured',
+  ];
+
+  const rows: string[][] = [];
+
+  items
+    .filter((i) => i.type === 'walktest')
+    .forEach((item) => {
+      // Cast at the boundary so tsc checks these field names against the real
+      // interface, rather than letting a renamed field export as an empty column.
+      const d = (item.data ?? {}) as Partial<WalkTestResult>;
+      const waypoints = d.waypoints ?? [];
+      const perWaypoint = d.perWaypoint ?? [];
+      const perTarget = d.perTarget ?? [];
+      const targets = d.targets ?? [];
+
+      const shared = [
+        escapeCsv(item.id),
+        escapeCsv(item.timestamp),
+        escapeCsv(new Date(item.timestamp).toLocaleString()),
+        escapeCsv(d.rounds ?? ''),
+        escapeCsv(d.intervalMs === undefined ? '' : d.intervalMs / 1000),
+        escapeCsv(d.durationMs === undefined ? '' : Math.round(d.durationMs / 1000)),
+      ];
+      const conclusions = escapeCsv((d.conclusions ?? []).join(' | '));
+      const notMeasured = escapeCsv(
+        (d.failures ?? []).map((f) => `${f.metric}: ${f.detail}`).join(' | '),
+      );
+
+      if (perWaypoint.length === 0 || perTarget.length === 0) {
+        // A walk that produced nothing still exports a row, so it stays
+        // distinguishable from a walk that never happened.
+        rows.push([...shared, ...Array(21).fill(escapeCsv('')), conclusions, notMeasured]);
+        return;
+      }
+
+      perWaypoint.forEach((spot) => {
+        const waypoint = waypoints.find((w) => w.id === spot.waypointId);
+        const spotCells = [
+          escapeCsv(spot.label),
+          escapeCsv(spot.rounds),
+          escapeCsv(spot.answered),
+          escapeCsv(spot.attempted),
+          escapeCsv(spot.medianOfTargetMediansMs ?? ''),
+          escapeCsv(waypoint?.reportedConnectionType ?? ''),
+          escapeCsv(waypoint?.reportedEffectiveType ?? ''),
+        ];
+
+        spot.perTarget.forEach((cell) => {
+          const overall = perTarget.find((t) => t.targetId === cell.targetId);
+          const target = targets.find((t) => t.id === cell.targetId);
+          rows.push([
+            ...shared,
+            ...spotCells,
+            escapeCsv(cell.label),
+            escapeCsv(cell.category),
+            escapeCsv(target?.host ?? ''),
+            escapeCsv(cell.summary.medianMs ?? ''),
+            escapeCsv(cell.summary.minMs ?? ''),
+            escapeCsv(cell.summary.maxMs ?? ''),
+            escapeCsv(cell.summary.p95Ms ?? ''),
+            escapeCsv(cell.summary.stdDevMs ?? ''),
+            escapeCsv(cell.jitterMs ?? ''),
+            escapeCsv(cell.summary.answered),
+            escapeCsv(cell.summary.attempted),
+            escapeCsv(overall?.summary.medianMs ?? ''),
+            escapeCsv(overall?.summary.answered ?? ''),
+            escapeCsv(overall?.summary.attempted ?? ''),
+            conclusions,
+            notMeasured,
+          ]);
+        });
+      });
+    });
+
+  return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+}
+
+/**
  * Captive-portal / DNS-hijack CSV — one row per integrity probe.
  *
  * The stored record holds both halves of the check, so the DNS verdict is
@@ -891,6 +1013,8 @@ export function getCsvForType(items: HistoryItem[], type: string): string {
       return generateDnsBenchmarkCsv(items);
     case 'captive':
       return generateCaptivePortalCsv(items);
+    case 'walktest':
+      return generateWalkTestCsv(items);
     default:
       return generateGenericCsv(items, type);
   }
