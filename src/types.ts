@@ -730,10 +730,14 @@ export interface WalkSample {
   roundTripMs: number | null;
   outcome: WalkProbeOutcome;
   /**
-   * True for the first probe against this destination in this run, which pays
-   * for DNS, TCP and TLS on top of the round trip. It is kept and counted, and
-   * excluded from the timing statistics, the same way the DNS benchmark
-   * discards its warm-up query.
+   * True for the first probe this destination *answers* in this run, which pays
+   * for DNS, TCP and TLS on top of the round trip. Keyed on the first answer
+   * rather than the first attempt: a destination that is silent for twenty
+   * rounds and then replies paid its handshake on round twenty-one.
+   *
+   * Kept and counted, and excluded from the timing statistics along with the
+   * opening warm-up rounds, the same way the DNS benchmark discards its warm-up
+   * query.
    */
   connectionSetup: boolean;
 }

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { WalkSample, WalkTarget, WalkWaypoint } from '../types';
 import {
+  DEFAULT_INTERVAL_MS,
+  INTERVAL_CHOICES,
   MAX_STORED_SAMPLES,
   WALK_TARGETS,
+  WARMUP_ROUNDS,
   buildWalkConclusions,
   buildWalkResult,
   createWaypoint,
+  isSteadyState,
   medianOfTargetMedians,
   summariseTarget,
   summariseWaypoint,
@@ -29,12 +33,26 @@ const waypoint = (id: string, label = id): WalkWaypoint => ({
   reportedEffectiveType: null,
 });
 
-/** Builds samples for one target: `times` of null means no response. */
+/** First round whose timings count. Rounds up to WARMUP_ROUNDS are discarded. */
+const FIRST_MEASURED_ROUND = WARMUP_ROUNDS + 1;
+
+/**
+ * Builds samples for one target; `null` means no response.
+ *
+ * Defaults to starting after the warm-up rounds, so a test that is about
+ * medians does not have to think about them. Pass `startRound` to place samples
+ * inside the warm-up window on purpose.
+ *
+ * `connectionSetup` is never set here. It is a property of a whole walk (the
+ * first answer a destination gives, once), not of one call to this helper, so
+ * marking it per call would wrongly discard a sample every time a destination
+ * appears at a second waypoint. Tests that care use `withSetup`.
+ */
 const samplesFor = (
   targetId: string,
   waypointId: string,
   times: (number | null)[],
-  startRound = 1,
+  startRound = FIRST_MEASURED_ROUND,
 ): WalkSample[] =>
   times.map((ms, i) => ({
     targetId,
@@ -43,8 +61,16 @@ const samplesFor = (
     timestamp: 1_700_000_000_000 + i * 1000,
     roundTripMs: ms,
     outcome: ms === null ? ('no-response' as const) : ('answered' as const),
-    connectionSetup: i === 0 && startRound === 1,
+    connectionSetup: false,
   }));
+
+/** Marks the first answered sample as the one that paid for DNS, TCP and TLS,
+ *  which is what `runWalkLoop` does. */
+const withSetup = (samples: WalkSample[]): WalkSample[] => {
+  const first = samples.findIndex((s) => s.outcome === 'answered');
+  if (first === -1) return samples;
+  return samples.map((s, i) => (i === first ? { ...s, connectionSetup: true } : s));
+};
 
 describe('summariseTarget', () => {
   it('reports no statistics at all below the minimum sample count', () => {
@@ -52,8 +78,8 @@ describe('summariseTarget', () => {
 
     expect(stats.summary.attempted).toBe(2);
     expect(stats.summary.answered).toBe(2);
-    // Two samples, one of which is the connection-setup probe, leaves one
-    // usable timing. Everything derived is absent, not small.
+    // Two usable timings is below the minimum. Everything derived is absent,
+    // not small.
     expect(stats.summary.medianMs).toBeNull();
     expect(stats.summary.minMs).toBeNull();
     expect(stats.summary.maxMs).toBeNull();
@@ -63,7 +89,7 @@ describe('summariseTarget', () => {
   it('excludes the connection-setup probe from the timings but not the counts', () => {
     // The first sample carries DNS, TCP and TLS. If it leaked into the median
     // the answer would be 60, not 40.
-    const stats = summariseTarget(target('a'), samplesFor('a', 'w1', [900, 30, 40, 50]));
+    const stats = summariseTarget(target('a'), withSetup(samplesFor('a', 'w1', [900, 30, 40, 50])));
 
     expect(stats.summary.attempted).toBe(4);
     expect(stats.summary.answered).toBe(4);
@@ -72,7 +98,10 @@ describe('summariseTarget', () => {
   });
 
   it('counts unanswered probes without inventing a time for them', () => {
-    const stats = summariseTarget(target('a'), samplesFor('a', 'w1', [20, 30, null, 40, 50]));
+    const stats = summariseTarget(
+      target('a'),
+      withSetup(samplesFor('a', 'w1', [20, 30, null, 40, 50])),
+    );
 
     expect(stats.summary.attempted).toBe(5);
     expect(stats.summary.answered).toBe(4);
@@ -81,7 +110,7 @@ describe('summariseTarget', () => {
   });
 
   it('keeps the last outcome even when the last probe failed', () => {
-    const stats = summariseTarget(target('a'), samplesFor('a', 'w1', [20, 30, 40, null]));
+    const stats = summariseTarget(target('a'), withSetup(samplesFor('a', 'w1', [20, 30, 40, null])));
 
     expect(stats.lastOutcome).toBe('no-response');
     expect(stats.lastRoundTripMs).toBeNull();
@@ -105,7 +134,70 @@ describe('summariseTarget', () => {
   });
 
   it('gives no jitter from a single usable timing', () => {
-    expect(summariseTarget(target('a'), samplesFor('a', 'w1', [100, 50])).jitterMs).toBeNull();
+    const stats = summariseTarget(target('a'), withSetup(samplesFor('a', 'w1', [100, 50])));
+    expect(stats.jitterMs).toBeNull();
+  });
+
+  it('discards the opening warm-up rounds of a walk', () => {
+    // Rounds 1 and 2 are wildly slow because the path is cold. Left in, they
+    // would set the top of the chart's axis for the rest of the session.
+    const samples = [
+      ...samplesFor('a', 'w1', [4000, 3000], 1),
+      ...samplesFor('a', 'w1', [40, 42, 44]),
+    ];
+    const stats = summariseTarget(target('a'), samples);
+
+    expect(stats.summary.attempted).toBe(5);
+    expect(stats.summary.answered).toBe(5);
+    expect(stats.summary.medianMs).toBe(42);
+    expect(stats.summary.maxMs).toBe(44);
+  });
+
+  it('still counts a warm-up round that failed', () => {
+    // Discarding a timing is not the same as pretending the probe never
+    // happened. A destination that was unreachable at the start was unreachable.
+    const samples = [
+      ...samplesFor('a', 'w1', [null, null], 1),
+      ...samplesFor('a', 'w1', [40, 42, 44]),
+    ];
+    const stats = summariseTarget(target('a'), samples);
+
+    expect(stats.summary.attempted).toBe(5);
+    expect(stats.summary.answered).toBe(3);
+    expect(stats.summary.medianMs).toBe(42);
+  });
+});
+
+describe('isSteadyState', () => {
+  // The charts and the statistics both filter on this, so they cannot disagree
+  // about which samples exist. That is the whole reason it is exported.
+  const sample = (over: Partial<WalkSample>): WalkSample => ({
+    targetId: 'a',
+    waypointId: 'w1',
+    round: FIRST_MEASURED_ROUND,
+    timestamp: 1,
+    roundTripMs: 40,
+    outcome: 'answered',
+    connectionSetup: false,
+    ...over,
+  });
+
+  it('accepts an answered probe past the warm-up rounds', () => {
+    expect(isSteadyState(sample({}))).toBe(true);
+  });
+
+  it('rejects every warm-up round', () => {
+    for (let round = 1; round <= WARMUP_ROUNDS; round++) {
+      expect(isSteadyState(sample({ round }))).toBe(false);
+    }
+  });
+
+  it('rejects the connection-setup probe wherever it lands', () => {
+    expect(isSteadyState(sample({ round: 40, connectionSetup: true }))).toBe(false);
+  });
+
+  it('rejects an unanswered probe', () => {
+    expect(isSteadyState(sample({ outcome: 'no-response', roundTripMs: null }))).toBe(false);
   });
 });
 
@@ -365,6 +457,14 @@ describe('WALK_TARGETS', () => {
     expect(WALK_TARGETS.some((t) => t.category === 'business')).toBe(true);
   });
 
+  it('leaves out destinations that common blocklists kill', () => {
+    // Meta domains sit on most ad and tracker blocklists, so that row failed
+    // for people whose network was entirely healthy. A false alarm in a
+    // diagnostic is worse than one fewer destination.
+    const blocked = ['www.facebook.com', 'www.instagram.com', 'connect.facebook.net'];
+    expect(WALK_TARGETS.filter((t) => blocked.includes(t.host))).toEqual([]);
+  });
+
   it('probes a terminal URL, not one that redirects', () => {
     // A `no-cors` request must follow redirects — the browser rejects any other
     // redirect mode outright — so a bouncing URL would fold two round trips into
@@ -381,6 +481,19 @@ describe('WALK_TARGETS', () => {
 
   it('describes every target, so the disclosure list stays complete', () => {
     expect(WALK_TARGETS.every((t) => t.note.trim().length > 0)).toBe(true);
+  });
+});
+
+describe('INTERVAL_CHOICES', () => {
+  it('offers a one-second tick', () => {
+    // Safe because the loop awaits a whole round before starting the timer, so
+    // the interval is a gap between rounds rather than a fixed cadence.
+    expect(INTERVAL_CHOICES).toContain(1000);
+  });
+
+  it('is ordered fastest first and holds the default', () => {
+    expect([...INTERVAL_CHOICES]).toEqual([...INTERVAL_CHOICES].sort((a, b) => a - b));
+    expect(INTERVAL_CHOICES).toContain(DEFAULT_INTERVAL_MS);
   });
 });
 

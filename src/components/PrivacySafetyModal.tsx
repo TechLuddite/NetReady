@@ -75,14 +75,14 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
       'are still theirs to log.',
   },
   {
-    host: 'stun.l.google.com (and other STUN servers)',
-    receives: 'Your public IP, and potentially local network addresses, during WebRTC analysis.',
+    host: 'api.github.com, httpbin.org, cloudflare.com, dns.google',
+    receives:
+      'Your IP, if you run the HTTP probe against one of the sample targets it offers as ' +
+      'one-click suggestions. Nothing contacts them unless you press the button.',
   },
   {
-    host: 'httpbin.org',
-    receives:
-      'Your IP, only if you press “Trigger Network Spike” on the live traffic monitor, which ' +
-      'makes a handful of requests so the sparklines have something real to draw.',
+    host: 'stun.l.google.com (and other STUN servers)',
+    receives: 'Your public IP, and potentially local network addresses, during WebRTC analysis.',
   },
   {
     host: 'basemaps.cartocdn.com',
