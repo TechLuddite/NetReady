@@ -64,15 +64,16 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
   },
   {
     host:
-      'www.google.com, www.youtube.com, www.netflix.com, www.facebook.com, www.amazon.com, ' +
-      'outlook.office365.com, teams.microsoft.com, zoom.us, login.salesforce.com, slack.com',
+      'www.google.com, www.youtube.com, www.netflix.com, www.amazon.com, ' +
+      'outlook.office365.com, teams.microsoft.com, zoom.us, login.salesforce.com, slack.com, ' +
+      'www.atlassian.com',
     receives:
       'Your IP, repeatedly, for as long as a Walk & Test run lasts — every one of them is probed ' +
-      'once per round, so a ten-minute walk at the default interval is roughly two hundred ' +
-      'requests to each. Each request is a HEAD for one small public file and carries no cookies ' +
-      '(`credentials: \'omit\'`), so these hosts see an address and a TLS handshake rather than a ' +
-      'logged-in user. Several of them are advertising businesses; the IP and the timing pattern ' +
-      'are still theirs to log.',
+      'once per round, so a ten-minute walk is a few hundred requests to each, up to roughly six ' +
+      'hundred at the one-second interval. Each request is a HEAD for one small public file and ' +
+      'carries no cookies (credentials: omit), so these hosts see an address and a TLS handshake ' +
+      'rather than a logged-in user. Several of them are advertising businesses; the IP and the ' +
+      'timing pattern are still theirs to log.',
   },
   {
     host: 'api.github.com, httpbin.org, cloudflare.com, dns.google',
