@@ -252,15 +252,58 @@ describe('assessProtocols', () => {
     expect(r.h3Count).toBe(1);
   });
 
-  it('infers blocked UDP when every h3-capable origin falls back to h2', () => {
+  it('reports observed HTTP/2 without identifying why HTTP/3 was absent', () => {
     const r = assessProtocols([probe('h2'), probe('h2'), probe('h2')]);
     expect(r.verdict).toBe('http3-absent-udp-possibly-blocked');
-    expect(r.explanation).toMatch(/UDP\/443/);
+    expect(r.h2Count).toBe(3);
+    expect(r.explanation).toContain('Browser settings');
+    expect(r.explanation).toContain('do not establish the cause');
+    expect(r.explanation).not.toMatch(/attempted QUIC|fell back/);
   });
 
-  it('flags a total fallback to HTTP/1.1', () => {
+  it('reports one readable HTTP/2 result without implying all probe targets answered', () => {
+    const r = assessProtocols([probe('h2'), probe(null), probe(null)]);
+    expect(r.h2Count).toBe(1);
+    expect(r.explanation).toContain('1 readable response(s)');
+    expect(r.explanation).not.toContain('All');
+  });
+
+  it('describes mixed HTTP/2 and HTTP/1.x responses accurately', () => {
+    const r = assessProtocols([probe('h2'), probe('http/1.1')]);
+    expect(r.verdict).toBe('http3-absent-udp-possibly-blocked');
+    expect(r.explanation).toContain('HTTP/2: 1; HTTP/1.x: 1');
+    expect(r.negotiated).toEqual(['h2', 'http/1.1']);
+    expect(r.explanation).not.toMatch(/All .*HTTP\/2/);
+  });
+
+  it('leaves unknown protocol evidence indeterminate', () => {
+    const r = assessProtocols([probe('h2'), probe('unknown')]);
+    expect(r.verdict).toBeNull();
+    expect(r.h2Count).toBe(1);
+    expect(r.explanation).toContain('Unrecognised protocol(s): unknown');
+    expect(r.negotiated).toEqual(['h2', 'unknown']);
+  });
+
+  it('does not classify an unrecognised h3-like value as measured HTTP/3', () => {
+    expect(assessProtocols([probe('h3-unknown')]).verdict).toBeNull();
+    expect(assessProtocols([probe('h3-29')]).verdict).toBe('http3-working');
+  });
+
+  it('excludes failed requests even if they contain a protocol value', () => {
+    const failed = { ...probe('h3'), availability: 'request-failed' as const };
+    const r = assessProtocols([failed, probe('h2')]);
+    expect(r.h3Count).toBe(0);
+    expect(r.h2Count).toBe(1);
+    expect(r.negotiated).toEqual(['h2']);
+    expect(r.verdict).toBe('http3-absent-udp-possibly-blocked');
+    expect(assessProtocols([failed]).verdict).toBeNull();
+  });
+
+  it('reports observed HTTP/1.x without asserting a fallback', () => {
     const r = assessProtocols([probe('http/1.1'), probe('http/1.1')]);
     expect(r.verdict).toBe('legacy-http1');
+    expect(r.explanation).toContain('2 readable responses used HTTP/1.x');
+    expect(r.explanation).toContain('does not establish a fallback');
   });
 
   it('deduplicates the negotiated list', () => {

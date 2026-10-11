@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ToolTab, NetworkConnectionInfo, HistoryItem } from './types';
+import { ToolTab, ToolLaunch, NetworkConnectionInfo, HistoryItem } from './types';
 import { getNetworkConnectionInfo } from './utils/network';
 import { getHistory, getLocalStorageSizeBytes } from './utils/storage';
 import { Navbar } from './components/Navbar';
@@ -10,7 +10,6 @@ import { DualStackCheck } from './components/DualStackCheck';
 import { DnsBenchmark } from './components/DnsBenchmark';
 import { CaptivePortalCheck } from './components/CaptivePortalCheck';
 import { EdgePathExplorer } from './components/EdgePathExplorer';
-import { TracertVisualizer } from './components/TracertVisualizer';
 import { PortScanner } from './components/PortScanner';
 import { GeoIpLookup } from './components/GeoIpLookup';
 import { SpeedTest } from './components/SpeedTest';
@@ -27,6 +26,15 @@ import { HardDrive } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ToolTab>('dashboard');
+  const [launch, setLaunch] = useState<ToolLaunch>();
+  const navigate = (tab: ToolTab) => {
+    setLaunch(undefined);
+    setActiveTab(tab);
+  };
+  const launchTool = (tab: ToolTab, values: Record<string, string>) => {
+    setLaunch({ id: Date.now(), tab, values });
+    setActiveTab(tab);
+  };
   const [connInfo, setConnInfo] = useState<NetworkConnectionInfo>(getNetworkConnectionInfo());
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [storageBytes, setStorageBytes] = useState<number>(0);
@@ -69,7 +77,7 @@ export default function App() {
       {/* Navigation Header */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={navigate}
         connInfo={connInfo}
         storageBytes={storageBytes}
       />
@@ -78,68 +86,63 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
         {activeTab === 'dashboard' && (
           <Dashboard
-            setActiveTab={setActiveTab}
-            connInfo={connInfo}
+            setActiveTab={navigate}
             history={history}
-            onHistoryUpdate={refreshHistory}
+            onLaunch={launchTool}
           />
         )}
 
-        {activeTab === 'walktest' && <WalkTest onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'walktest' && <WalkTest launch={launch} onHistoryUpdate={refreshHistory} />}
 
-        {activeTab === 'triage' && <TriagePanel onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'triage' && <TriagePanel launch={launch} onHistoryUpdate={refreshHistory} />}
 
-        {activeTab === 'dualstack' && <DualStackCheck onHistoryUpdate={refreshHistory} />}
-        {activeTab === 'dnsbench' && <DnsBenchmark onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'dualstack' && <DualStackCheck launch={launch} onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'dnsbench' && <DnsBenchmark launch={launch} onHistoryUpdate={refreshHistory} />}
 
-        {activeTab === 'captive' && <CaptivePortalCheck onHistoryUpdate={refreshHistory} />}
+        {activeTab === 'captive' && <CaptivePortalCheck launch={launch} onHistoryUpdate={refreshHistory} />}
 
         {activeTab === 'edgepath' && (
-          <EdgePathExplorer onHistoryUpdate={refreshHistory} />
-        )}
-
-        {activeTab === 'tracert' && (
-          <TracertVisualizer onHistoryUpdate={refreshHistory} />
+          <EdgePathExplorer launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'portscanner' && (
-          <PortScanner onHistoryUpdate={refreshHistory} />
+          <PortScanner launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'geoip' && (
-          <GeoIpLookup onHistoryUpdate={refreshHistory} />
+          <GeoIpLookup launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'speedtest' && (
-          <SpeedTest onHistoryUpdate={refreshHistory} />
+          <SpeedTest launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'ping' && (
-          <PingTester onHistoryUpdate={refreshHistory} />
+          <PingTester launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'dns' && (
-          <DnsResolver onHistoryUpdate={refreshHistory} />
+          <DnsResolver launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'webrtc' && (
-          <WebRtcAnalyzer onHistoryUpdate={refreshHistory} />
+          <WebRtcAnalyzer launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'cidr' && (
-          <CidrCalculator onHistoryUpdate={refreshHistory} />
+          <CidrCalculator launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'mac' && (
-          <MacLookup onHistoryUpdate={refreshHistory} />
+          <MacLookup launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'httpprobe' && (
-          <HttpProbe onHistoryUpdate={refreshHistory} />
+          <HttpProbe launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'websocket' && (
-          <WebSocketTester onHistoryUpdate={refreshHistory} />
+          <WebSocketTester launch={launch} onHistoryUpdate={refreshHistory} />
         )}
 
         {activeTab === 'history' && (

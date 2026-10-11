@@ -1,3 +1,4 @@
+import type { ToolLaunch } from '../types';
 import React, { useState, useRef, useEffect } from 'react';
 import { Radio, Play, StopCircle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -8,12 +9,13 @@ import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './R
 import { MetricValue, displayMetric } from './MetricValue';
 
 interface PingTesterProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
-export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
+export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate, launch }) => {
   const [selectedTarget, setSelectedTarget] = useState(PING_TARGET_PRESETS[0].url);
-  const [customTarget, setCustomTarget] = useState('');
+  const [customTarget, setCustomTarget] = useState(launch?.values.target ?? '');
   const [packetCount, setPacketCount] = useState<number>(15);
   const [isPinging, setIsPinging] = useState(false);
   const [points, setPoints] = useState<PingPoint[]>([]);
@@ -138,6 +140,17 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
     executePing();
   };
 
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleStartPing();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -153,29 +166,6 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             Measures round-trip time, jitter and packet loss using HTTP HEAD probes. This is application-layer timing, not ICMP — it includes TLS and server handling, so it reads slightly higher than a system ping.
           </p>
         </div>
-
-        <button
-          onClick={handleStartPing}
-          className={`flex items-center space-x-2 font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg active:scale-95 ${
-            isPinging
-              ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-500/20'
-              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white shadow-blue-500/20'
-          }`}
-        >
-          {isPinging ? (
-            <>
-              <StopCircle className="w-4 h-4 fill-white animate-pulse" />
-              <span>
-                Stop Ping {packetCount === 0 ? `(${points.length} sent)` : `(${points.length}/${packetCount})`}
-              </span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>{packetCount === 0 ? 'Start Continuous Ping' : 'Start Ping Sequence'}</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Target Selector Bar */}
@@ -244,6 +234,29 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
             </select>
           </div>
         </div>
+
+        <button
+          onClick={handleStartPing}
+          className={`flex items-center space-x-2 font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg active:scale-95 ${
+            isPinging
+              ? 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-rose-500/20'
+              : 'bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white shadow-blue-500/20'
+          }`}
+        >
+          {isPinging ? (
+            <>
+              <StopCircle className="w-4 h-4 fill-white animate-pulse" />
+              <span>
+                Stop Ping {packetCount === 0 ? `(${points.length} sent)` : `(${points.length}/${packetCount})`}
+              </span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>{packetCount === 0 ? 'Start Continuous Ping' : 'Start Ping Sequence'}</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Ping Metrics Summary Cards */}
@@ -351,7 +364,7 @@ export const PingTester: React.FC<PingTesterProps> = ({ onHistoryUpdate }) => {
                     {pt.status === 'success' ? (
                       <span className="inline-flex items-center space-x-1 text-emerald-400">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>200 OK</span>
+                        <span>Answered</span>
                       </span>
                     ) : (
                       <span className="inline-flex items-center space-x-1 text-rose-400">

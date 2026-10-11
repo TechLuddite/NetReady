@@ -39,9 +39,9 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
       'the other a valid one. Only the resolvers see these queries.',
   },
   {
-    host: 'ipwho.is / ipapi.co / freeipapi.com',
+    host: 'ipwho.is / ipapi.co',
     receives:
-      'Your public IP when you open the GeoIP tool, and every IP or domain you look up or trace.',
+      'Your public IP when you run a GeoIP lookup, and every IP or domain you look up.',
   },
   {
     host: '1.1.1.1, one.one.one.one, dns.quad9.net, doh.opendns.com, en.wikipedia.org',
@@ -88,7 +88,7 @@ export const THIRD_PARTY_DISCLOSURES: { host: string; receives: string }[] = [
   },
   {
     host: 'basemaps.cartocdn.com',
-    receives: 'The map area you view, which reveals the approximate location of a traced target.',
+    receives: 'The map area you view, which reveals approximate endpoint locations in Edge Path Explorer.',
   },
   {
     host: 'openstreetmap.org',
@@ -200,14 +200,9 @@ export const PrivacySafetyModal: React.FC<PrivacySafetyModalProps> = ({ isOpen, 
             </p>
           </div>
 
-          {/* The honest part.
-              A diagnostic tool cannot measure a network without touching it.
-              Claiming "we do not transmit any IP addresses, scan targets or
-              domain names" was flatly untrue: running a trace sends the target
-              IP to two GeoIP providers, opening the GeoIP tab sends your own
-              public IP before you click anything, and a speed test moves tens
-              of megabytes through Cloudflare. Listing that is more useful to a
-              privacy-conscious user than a reassuring sentence. */}
+          {/* Diagnostics contact external hosts. GeoIP queries send addresses to
+              lookup providers and speed tests move data through Cloudflare.
+              The list explains those requests before a user runs a tool. */}
           <div className="space-y-3 border-t border-white/5 pt-4">
             <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400">
               What leaves your browser, and to whom

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import { Network, Play, Loader2, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 import type { AddressFamily, DualStackResult, HistoryItem } from '../types';
 import { checkDualStack, describeReachability } from '../utils/dualStack';
@@ -16,6 +17,7 @@ import { saveHistoryItem } from '../utils/storage';
  */
 
 interface DualStackCheckProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -79,7 +81,7 @@ const FamilyCard: React.FC<{
   );
 };
 
-export const DualStackCheck: React.FC<DualStackCheckProps> = ({ onHistoryUpdate }) => {
+export const DualStackCheck: React.FC<DualStackCheckProps> = ({ onHistoryUpdate, launch }) => {
   const [result, setResult] = useState<DualStackResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState<string>('');
@@ -108,6 +110,17 @@ export const DualStackCheck: React.FC<DualStackCheckProps> = ({ onHistoryUpdate 
       setStage('');
     }
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void run();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   return (
     <div className="space-y-6">

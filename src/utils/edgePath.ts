@@ -11,7 +11,7 @@ import type {
 } from '../types';
 import { createId } from './network';
 import { lookupIata } from '../data/iata';
-import { calculateGreatCircleDistanceKm } from './tracert';
+import { calculateGreatCircleDistanceKm } from './geo';
 
 /**
  * Edge Path Explorer.
@@ -23,8 +23,8 @@ import { calculateGreatCircleDistanceKm } from './tracert';
  *   1. The DNS → TCP → TLS → TTFB breakdown of a real connection, from the
  *      Resource Timing API.
  *   2. Which CDN edge answered, by IATA code, resolved to a real coordinate.
- *   3. The protocol negotiated (h3 / h2 / http/1.1), which reveals whether
- *      UDP/443 is being blocked somewhere upstream.
+ *   3. The protocol negotiated (h3 / h2 / http/1.1). This reports HTTP/3
+ *      when observed, but cannot establish why another protocol was used.
  *   4. An upper bound on how far away a server can be, from round-trip time
  *      and the speed of light in fibre.
  *
@@ -303,16 +303,19 @@ export async function fetchTargetPop(host: string, signal?: AbortSignal): Promis
 }
 
 /**
- * Turns observed protocols into a verdict about UDP/443.
+ * Summarises protocols observed on successful requests.
  *
- * All four probe origins advertise HTTP/3. If every one of them negotiated
- * HTTP/2 instead, the browser tried QUIC and fell back — which is real evidence
- * that UDP/443 is blocked upstream, not a guess.
+ * Resource Timing exposes the negotiated protocol, not QUIC connection
+ * attempts, browser settings, or protocol discovery. Missing HTTP/3 therefore
+ * cannot identify a blocked UDP path. Failed requests supply no protocol evidence.
  */
 export function assessProtocols(probes: EdgeProbeResult[]): ProtocolEvidence {
-  const protocols = probes.map((p) => p.protocol).filter((p): p is string => Boolean(p));
+  const protocols = probes
+    .filter((p) => p.availability !== 'request-failed')
+    .map((p) => p.protocol)
+    .filter((p): p is string => Boolean(p));
 
-  const h3Count = protocols.filter((p) => p.startsWith('h3')).length;
+  const h3Count = protocols.filter((p) => /^h3(?:-\d+)?$/.test(p)).length;
   const h2Count = protocols.filter((p) => p === 'h2').length;
   const http1Count = protocols.filter((p) => p.startsWith('http/1')).length;
   const negotiated = Array.from(new Set(protocols));
@@ -338,8 +341,23 @@ export function assessProtocols(probes: EdgeProbeResult[]): ProtocolEvidence {
       http1Count,
       verdict: 'http3-working',
       explanation:
-        `HTTP/3 negotiated with ${h3Count} of ${protocols.length} origins, so QUIC over ` +
-        'UDP/443 is reaching the network. This usually means lower latency on lossy links.',
+        `HTTP/3 was observed on ${h3Count} of ${protocols.length} readable responses. ` +
+        'Its QUIC transport succeeded for those requests.',
+    };
+  }
+
+  const observed = `HTTP/2: ${h2Count}; HTTP/1.x: ${http1Count}.`;
+  const unknown = protocols.filter((p) => p !== 'h2' && !p.startsWith('http/1'));
+  if (unknown.length > 0) {
+    return {
+      negotiated,
+      h3Count,
+      h2Count,
+      http1Count,
+      verdict: null,
+      explanation:
+        `${observed} Unrecognised protocol(s): ${Array.from(new Set(unknown)).join(', ')}. ` +
+        'These responses do not establish HTTP/3 availability or a network fault.',
     };
   }
 
@@ -351,8 +369,9 @@ export function assessProtocols(probes: EdgeProbeResult[]): ProtocolEvidence {
       http1Count,
       verdict: 'legacy-http1',
       explanation:
-        'Every connection fell back to HTTP/1.1. A proxy or TLS-inspecting middlebox is the ' +
-        'usual cause, and it costs both throughput and latency.',
+        `All ${protocols.length} readable responses used HTTP/1.x. ` +
+        'Browser settings, server configuration, or a proxy may explain this. ' +
+        'The negotiated protocol alone does not establish a fallback or its cause.',
     };
   }
 
@@ -363,10 +382,9 @@ export function assessProtocols(probes: EdgeProbeResult[]): ProtocolEvidence {
     http1Count,
     verdict: 'http3-absent-udp-possibly-blocked',
     explanation:
-      `All ${protocols.length} origins negotiated HTTP/2 despite advertising HTTP/3. The ` +
-      'browser attempted QUIC and fell back, which points to UDP/443 being blocked by a ' +
-      'firewall or middlebox on this network. Connections still work; they just lose the ' +
-      'faster path.',
+      `No HTTP/3 was observed on ${protocols.length} readable response(s). ${observed} ` +
+      'Browser settings, protocol discovery, connection reuse, or blocked UDP could explain ' +
+      'this. The negotiated protocols alone do not establish the cause.',
   };
 }
 

@@ -83,7 +83,7 @@ thing this tool has that mainstream speed tests do not.
   boundary and let tsc check it. Every CSV generator has a test — keep it that way.
 - **Leaflet `divIcon({html})` and `bindPopup(html)` are `innerHTML` sinks.** They were
   fed raw user hostnames and third-party GeoIP strings, which was live XSS. Build DOM
-  nodes and set `textContent`. See `buildHopPopup` / `buildPopup`.
+  nodes and set `textContent`. See `buildPopup`.
 - **CSV needs formula-injection escaping**, not just quoting. `escapeCsv` prefixes
   `=`, `+`, `-`, `@`, tab and CR. Always use it; never hand-roll quoting.
 - **Third parties must stay disclosed.** `THIRD_PARTY_DISCLOSURES` in
@@ -130,9 +130,11 @@ conclusions rather than reporting numbers, so it has its own version of the rule
 
 ## Verification
 
-Run `npm run check`. For anything touching measurement or rendering, also drive the real
-app — `npm run build && npm run preview`, then Playwright against `127.0.0.1:4173`
-(Chromium at `/opt/pw-browsers/chromium`).
+Run `npm run check`. For anything touching measurement or rendering, also run
+`npm run test:browser` (builds the app and drives Chromium through Playwright).
+Install Chromium once with `npx playwright install chromium`. The browser checks cover
+dashboard launches, adjacent controls, history preservation, GeoIP missing fields and
+offline speed measurements; supplement them when changing other measurement paths.
 
 **The regression test that matters most:** go offline in DevTools and run every tool.
 Every metric must read `—` with a reason. A number appearing anywhere is a P0.

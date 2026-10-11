@@ -58,6 +58,7 @@ export function timeoutSignal(
   const timer = setTimeout(() => controller.abort(), ms);
   const onAbort = () => controller.abort();
   external?.addEventListener('abort', onAbort);
+  if (external?.aborted) controller.abort();
   return {
     signal: controller.signal,
     done: () => {
@@ -492,10 +493,19 @@ export async function runSpeedTest(
   let loadedPingTimer: ReturnType<typeof setTimeout> | undefined;
   const loadedPingDone = new Promise<void>((resolve) => {
     loadedPingTimer = setTimeout(async () => {
+      const bytesBeforeProbe = totalBytesDownloaded;
+      if (bytesBeforeProbe === 0 || signal?.aborted) {
+        resolve();
+        return;
+      }
       const start = performance.now();
       try {
         await fetch(`${LATENCY_URL}&_loaded=${Date.now()}`, { cache: 'no-store', signal });
-        loadedPing = Math.round(performance.now() - start);
+        // Starting workers is not evidence of load. Require actual download
+        // bytes to arrive during the latency probe before calling it loaded.
+        if (totalBytesDownloaded > bytesBeforeProbe) {
+          loadedPing = Math.round(performance.now() - start);
+        }
       } catch {
         /* leave null — an unmeasured loaded ping must not become ping + 14 */
       }
@@ -595,7 +605,7 @@ export async function runSpeedTest(
     failures.push({
       metric: 'bufferbloatScore',
       reason: 'insufficient-samples',
-      detail: 'Bufferbloat needs both an idle and a under-load latency sample.',
+      detail: 'Bufferbloat needs idle latency and a latency sample with observed concurrent download traffic.',
     });
   }
 
@@ -863,20 +873,44 @@ export async function testWebSocket(
 
   return new Promise((resolve) => {
     let ws: WebSocket | null = null;
-    let handshakeTimeMs = 0;
+    let handshakeTimeMs: number | null = null;
     let messagesSent = 0;
     let messagesReceived = 0;
+    let settled = false;
+    let nextEchoTimer: ReturnType<typeof setTimeout> | undefined;
+    let pendingPayload: string | null = null;
+    let pendingStart = 0;
 
-    const cleanup = (status: 'connected' | 'error' | 'closed') => {
+    const cleanup = (
+      status: WebSocketResult['status'],
+      reason: MeasurementFailure['reason'] = 'api-unreachable',
+    ) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      clearTimeout(nextEchoTimer);
       if (ws) {
-        ws.close();
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        try { ws.close(); } catch { /* already closed */ }
         ws = null;
       }
       const avgPingMs =
-        pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : 0;
+        pings.length > 0 ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : null;
+      const failures: MeasurementFailure[] = [];
+      if (handshakeTimeMs === null) {
+        failures.push({ metric: 'handshakeTimeMs', reason, detail: 'The WebSocket handshake did not complete.' });
+      }
+      if (avgPingMs === null) {
+        failures.push({ metric: 'avgPingMs', reason, detail: 'No matching echo reply was received, so round-trip latency was not measured.' });
+      } else if (messagesReceived < 3) {
+        failures.push({ metric: 'echoReplies', reason, detail: 'The connection ended before all three matching echo replies arrived.' });
+      }
 
       resolve({
-        id: 'ws_' + Date.now(),
+        id: createId('ws'),
         timestamp: Date.now(),
         url: wsUrl,
         handshakeTimeMs,
@@ -885,7 +919,21 @@ export async function testWebSocket(
         status,
         messagesSent,
         messagesReceived,
+        failures: failures.length ? failures : undefined,
       });
+    };
+    const timeout = setTimeout(() => cleanup('error', 'timeout'), 4000);
+
+    const sendEcho = () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN || settled) return;
+      pendingStart = performance.now();
+      pendingPayload = JSON.stringify({ ping: messagesSent + 1, time: pendingStart });
+      try {
+        ws.send(pendingPayload);
+        messagesSent++;
+      } catch {
+        cleanup('error');
+      }
     };
 
     try {
@@ -894,42 +942,20 @@ export async function testWebSocket(
       ws.onopen = () => {
         handshakeTimeMs = Math.round(performance.now() - startTime);
 
-        // Send 3 ping echo packets
-        const sendEcho = (seq: number) => {
-          if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          const msgStart = performance.now();
-          const payload = JSON.stringify({ ping: seq, time: msgStart });
-          ws.send(payload);
-          messagesSent++;
-
-          const onMsg = () => {
-            const rtt = Math.round(performance.now() - msgStart);
-            pings.push(rtt);
-            messagesReceived++;
-            ws?.removeEventListener('message', onMsg);
-
-            if (seq < 3) {
-              setTimeout(() => sendEcho(seq + 1), 150);
-            } else {
-              cleanup('connected');
-            }
-          };
-
-          ws.addEventListener('message', onMsg);
-        };
-
-        sendEcho(1);
+        sendEcho();
       };
-
-      ws.onerror = () => {
-        cleanup('error');
+      ws.onmessage = (event) => {
+        // Banners, broadcasts, stale replies and duplicate echoes do not time
+        // the request we sent. Only an exact echo is an RTT measurement.
+        if (settled || pendingPayload === null || event.data !== pendingPayload) return;
+        pendingPayload = null;
+        pings.push(Math.round(performance.now() - pendingStart));
+        messagesReceived++;
+        if (messagesReceived === 3) cleanup('connected');
+        else nextEchoTimer = setTimeout(sendEcho, 150);
       };
-
-      setTimeout(() => {
-        if (ws && ws.readyState !== WebSocket.CLOSED) {
-          cleanup(pings.length > 0 ? 'connected' : 'error');
-        }
-      }, 4000);
+      ws.onerror = () => cleanup('error');
+      ws.onclose = () => cleanup('closed');
     } catch {
       cleanup('error');
     }
@@ -1131,6 +1157,12 @@ export function describeTargetExpansion(input: string): string | null {
 export function parseTargetHosts(input: string): string[] {
   const raw = input.trim();
   if (!raw) return ['127.0.0.1'];
+  const ipv4Pattern = /^\d+\.\d+\.\d+\.\d+$/;
+  const validateIpv4 = (ip: string) => {
+    if (!ipv4Pattern.test(ip) || ip.split('.').some((octet) => Number(octet) > 255)) {
+      throw new Error(`Invalid IPv4 address: ${ip}`);
+    }
+  };
 
   // Handle comma separated values
   if (raw.includes(',')) {
@@ -1144,7 +1176,13 @@ export function parseTargetHosts(input: string): string[] {
   // Handle CIDR subnets e.g. 192.168.1.0/24 or 10.0.0.0/28
   if (raw.includes('/')) {
     const [ipPart, prefixStr] = raw.split('/');
-    const prefix = parseInt(prefixStr, 10);
+    const prefix = Number(prefixStr);
+    if (ipv4Pattern.test(ipPart.trim())) {
+      validateIpv4(ipPart.trim());
+      if (!Number.isInteger(prefix) || prefix < 16 || prefix > 32) {
+        throw new Error('Port scanner CIDR prefixes must be whole numbers from 16 through 32.');
+      }
+    }
     if (!isNaN(prefix) && prefix >= 16 && prefix <= 32) {
       const ipToNum = (ip: string) =>
         ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
@@ -1152,6 +1190,7 @@ export function parseTargetHosts(input: string): string[] {
         [(num >>> 24) & 255, (num >>> 16) & 255, (num >>> 8) & 255, num & 255].join('.');
 
       const cleanIp = ipPart.trim();
+      validateIpv4(cleanIp);
       const maskLong = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
       const ipLong = ipToNum(cleanIp);
       const networkLong = (ipLong & maskLong) >>> 0;
@@ -1174,7 +1213,7 @@ export function parseTargetHosts(input: string): string[] {
   }
 
   // Handle Range e.g. 192.168.1.1-192.168.1.20 or 192.168.1.1-20
-  if (raw.includes('-') && !raw.includes('nmap.org')) {
+  if (/^\d+\.\d+\.\d+\.\d+-/.test(raw)) {
     const parts = raw.split('-');
     const startStr = parts[0].trim();
     let endStr = parts[1].trim();
@@ -1185,6 +1224,8 @@ export function parseTargetHosts(input: string): string[] {
         endStr = `${octets[0]}.${octets[1]}.${octets[2]}.${endStr}`;
       }
     }
+    validateIpv4(startStr);
+    validateIpv4(endStr);
 
     const ipToNum = (ip: string) =>
       ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
@@ -1204,6 +1245,7 @@ export function parseTargetHosts(input: string): string[] {
   }
 
   const clean = raw.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  if (ipv4Pattern.test(clean)) validateIpv4(clean);
   return [clean];
 }
 
@@ -1231,13 +1273,13 @@ export async function scanSinglePort(
     service.toLowerCase().includes('http');
   const protocol: 'http' | 'https' = port === 443 || port === 8443 ? 'https' : 'http';
 
-  // If port is restricted by browser policy, classify as filtered (browser restricted)
+  // Browser policy prevented the probe; this says nothing about the port.
   if (RESTRICTED_PORTS.includes(port)) {
     return {
       host: cleanHost,
       port,
-      status: 'filtered',
-      latencyMs: 0,
+      status: 'not-tested',
+      latencyMs: null,
       service: `${service} (Browser Restricted)`,
       description: `${description} - Probing restricted by browser security policy.`,
       isWeb,
@@ -1461,19 +1503,19 @@ export async function scanPortList(
         if (item.alive) {
           aliveHosts.push(item.host);
         } else {
-          // Pre-populate offline hosts' ports as filtered to save time
+          // Discovery failed on other ports. These requested ports were never
+          // probed, so neither a port status nor latency has been measured.
           for (const p of ports) {
             resultsMap.push({
               host: item.host,
               port: p,
-              status: 'filtered',
-              latencyMs: 0,
+              status: 'not-tested',
+              latencyMs: null,
               service: COMMON_PORTS.find((cp) => cp.port === p)?.service || `Port ${p}`,
-              description: 'Host unreachable during discovery pre-check',
+              description: 'Not probed because host discovery received no conclusive response.',
               isWeb: [80, 443, 3000, 5000, 8000, 8080, 8443, 8001, 8081, 8888, 9000].includes(p),
               protocol: p === 443 || p === 8443 ? 'https' : 'http',
             });
-            filteredCount++;
           }
         }
       }
@@ -1482,8 +1524,8 @@ export async function scanPortList(
         const dummyResult: PortStatus = {
           host: chunk[chunk.length - 1],
           port: 0,
-          status: 'filtered',
-          latencyMs: 0,
+          status: 'not-tested',
+          latencyMs: null,
           service: 'Host Discovery',
           description: 'Ping & Multi-probe Host Discovery',
           isWeb: false,
@@ -1519,7 +1561,7 @@ export async function scanPortList(
 
       if (res.status === 'open') openCount++;
       else if (res.status === 'closed') closedCount++;
-      else filteredCount++;
+      else if (res.status === 'filtered') filteredCount++;
 
       processedCount++;
       if (onProgress) {

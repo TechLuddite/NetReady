@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Play, RefreshCw } from 'lucide-react';
 import { WebSocketResult, HistoryItem } from '../types';
 import { testWebSocket } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
+import { MetricValue, FailureNotice, displayMetric } from './MetricValue';
 
 interface WebSocketTesterProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -13,10 +16,11 @@ const WS_PRESETS = [
   'wss://ws.postman-echo.com/raw',
 ];
 
-export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdate }) => {
-  const [wsUrl, setWsUrl] = useState('wss://echo.websocket.org');
+export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdate, launch }) => {
+  const [wsUrl, setWsUrl] = useState(launch?.values.url ?? 'wss://echo.websocket.org');
   const [isTesting, setIsTesting] = useState(false);
   const [result, setResult] = useState<WebSocketResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleTestWs = async (overrideUrl?: string) => {
     const url = overrideUrl || wsUrl;
@@ -24,6 +28,7 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
 
     setIsTesting(true);
     setResult(null);
+    setError(null);
 
     try {
       const res = await testWebSocket(url);
@@ -36,7 +41,7 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
         timestamp: res.timestamp,
         title: `WebSocket Test: ${res.url}`,
         summary: res.status === 'connected'
-          ? `Connected in ${res.handshakeTimeMs} ms | Avg Ping: ${res.avgPingMs} ms`
+          ? `Connected in ${displayMetric(res.handshakeTimeMs, 'ms')} | Avg Ping: ${displayMetric(res.avgPingMs, 'ms')}`
           : `Connection Error / Closed`,
         data: res,
       };
@@ -45,10 +50,22 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
       onHistoryUpdate();
     } catch (e) {
       console.error('WebSocket test failed:', e);
+      setError(e instanceof Error ? `WebSocket test could not finish: ${e.message}` : 'WebSocket test could not finish.');
     } finally {
       setIsTesting(false);
     }
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleTestWs();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   return (
     <div className="space-y-6">
@@ -65,24 +82,6 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
             Test persistent WebSocket handshake connection setup times, message frame roundtrip latency, and echo packet reliability.
           </p>
         </div>
-
-        <button
-          onClick={() => handleTestWs()}
-          disabled={isTesting}
-          className="flex items-center space-x-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-teal-500/20 active:scale-95 disabled:opacity-50"
-        >
-          {isTesting ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Connecting & Echoing...</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>Test WebSocket Connection</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Input Form */}
@@ -116,7 +115,31 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 font-mono focus:outline-none focus:border-teal-500"
           />
         </div>
+
+        <button
+          onClick={() => handleTestWs()}
+          disabled={isTesting}
+          className="flex items-center space-x-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-400 hover:to-emerald-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-teal-500/20 active:scale-95 disabled:opacity-50"
+        >
+          {isTesting ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Connecting & Echoing...</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>Test WebSocket Connection</span>
+            </>
+          )}
+        </button>
       </div>
+
+      {error && (
+        <div role="alert" className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-4 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
 
       {/* Results View */}
       {result && (
@@ -142,16 +165,18 @@ export const WebSocketTester: React.FC<WebSocketTesterProps> = ({ onHistoryUpdat
             </div>
           </div>
 
+          <FailureNotice failures={result.failures} />
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono text-xs">
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <div className="text-slate-400 uppercase text-[11px] mb-1">Handshake Setup Latency</div>
-              <div className="text-xl font-bold text-teal-400">{result.handshakeTimeMs} ms</div>
+              <div className="text-xl font-bold text-teal-400"><MetricValue value={result.handshakeTimeMs} unit="ms" /></div>
             </div>
 
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
               <div className="text-slate-400 uppercase text-[11px] mb-1">Average Echo Ping RTT</div>
               <div className="text-xl font-bold text-emerald-400">
-                {result.avgPingMs > 0 ? `${result.avgPingMs} ms` : 'N/A'}
+                <MetricValue value={result.avgPingMs} unit="ms" />
               </div>
             </div>
 

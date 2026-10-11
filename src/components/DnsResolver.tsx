@@ -1,18 +1,20 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import { Globe, Search, RefreshCw, CheckCircle2, Copy, Code } from 'lucide-react';
 import { DnsQueryResult, HistoryItem } from '../types';
 import { queryDnsOverHttps } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 
 interface DnsResolverProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
 const PRESET_DOMAINS = ['google.com', 'cloudflare.com', 'github.com', 'wikipedia.org', 'apple.com'];
 const RECORD_TYPES = ['A', 'AAAA', 'MX', 'TXT', 'NS', 'CNAME', 'CAA', 'SOA'];
 
-export const DnsResolver: React.FC<DnsResolverProps> = ({ onHistoryUpdate }) => {
-  const [domain, setDomain] = useState('cloudflare.com');
+export const DnsResolver: React.FC<DnsResolverProps> = ({ onHistoryUpdate, launch }) => {
+  const [domain, setDomain] = useState(launch?.values.domain ?? 'cloudflare.com');
   const [recordType, setRecordType] = useState('A');
   const [provider, setProvider] = useState<'cloudflare' | 'google'>('cloudflare');
   const [isQuerying, setIsQuerying] = useState(false);
@@ -50,6 +52,17 @@ export const DnsResolver: React.FC<DnsResolverProps> = ({ onHistoryUpdate }) => 
     }
   };
 
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleLookup();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
+
   const copyToClipboard = (text: string, index: number) => {
     navigator.clipboard.writeText(text);
     setCopiedIndex(index);
@@ -71,24 +84,6 @@ export const DnsResolver: React.FC<DnsResolverProps> = ({ onHistoryUpdate }) => 
             Query standard DNS records over encrypted HTTPS protocols directly from your browser using Cloudflare or Google DoH backends.
           </p>
         </div>
-
-        <button
-          onClick={() => handleLookup()}
-          disabled={isQuerying}
-          className="flex items-center space-x-2 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-purple-500/20 active:scale-95 disabled:opacity-50"
-        >
-          {isQuerying ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Resolving DNS...</span>
-            </>
-          ) : (
-            <>
-              <Search className="w-4 h-4 text-white" />
-              <span>Resolve DNS Records</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Query Form Bar */}
@@ -154,6 +149,24 @@ export const DnsResolver: React.FC<DnsResolverProps> = ({ onHistoryUpdate }) => 
             </select>
           </div>
         </div>
+
+        <button
+          onClick={() => handleLookup()}
+          disabled={isQuerying}
+          className="flex items-center space-x-2 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-purple-500/20 active:scale-95 disabled:opacity-50"
+        >
+          {isQuerying ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Resolving DNS...</span>
+            </>
+          ) : (
+            <>
+              <Search className="w-4 h-4 text-white" />
+              <span>Resolve DNS Records</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Query Results View */}

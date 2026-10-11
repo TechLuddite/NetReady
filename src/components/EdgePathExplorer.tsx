@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   Compass,
   Play,
@@ -18,6 +19,7 @@ import { FailureNotice, displayMetric } from './MetricValue';
 import { EdgeMap, type MapNode, type MapLink, type MapRing } from './EdgeMap';
 
 interface EdgePathExplorerProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -83,8 +85,8 @@ const Waterfall: React.FC<{ probe: EdgeProbeResult }> = ({ probe }) => {
   );
 };
 
-export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpdate }) => {
-  const [targetHost, setTargetHost] = useState('cloudflare.com');
+export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpdate, launch }) => {
+  const [targetHost, setTargetHost] = useState(launch?.values.target ?? 'cloudflare.com');
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState('');
   const [result, setResult] = useState<EdgePathResult | null>(null);
@@ -138,6 +140,17 @@ export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpd
     }
     execute();
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleStart();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   // Only points with genuine coordinates reach the map.
   const { nodes, links, rings } = useMemo(() => {
@@ -252,24 +265,6 @@ export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpd
             negotiated, and how far away a server can possibly be.
           </p>
         </div>
-
-        <button
-          onClick={handleStart}
-          disabled={isRunning}
-          className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/20 active:scale-95 disabled:opacity-50"
-        >
-          {isRunning ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Exploring…</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>Explore path</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Why there are no intermediate hops. */}
@@ -333,6 +328,24 @@ export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpd
           the field is reported as unavailable rather than guessed — the rest of the exploration
           still runs.
         </p>
+
+        <button
+          onClick={handleStart}
+          disabled={isRunning}
+          className="flex items-center space-x-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/20 active:scale-95 disabled:opacity-50"
+        >
+          {isRunning ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Exploring…</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>Explore path</span>
+            </>
+          )}
+        </button>
       </div>
 
       {result && (
@@ -436,10 +449,10 @@ export const EdgePathExplorer: React.FC<EdgePathExplorerProps> = ({ onHistoryUpd
               <p className="text-sm font-bold">
                 {result.protocolEvidence.verdict === 'http3-working' && 'HTTP/3 is working'}
                 {result.protocolEvidence.verdict === 'http3-absent-udp-possibly-blocked' &&
-                  'HTTP/3 unavailable — UDP/443 may be blocked'}
-                {result.protocolEvidence.verdict === 'legacy-http1' && 'Connections fell back to HTTP/1.1'}
+                  'HTTP/3 was not observed'}
+                {result.protocolEvidence.verdict === 'legacy-http1' && 'Only HTTP/1.x was observed'}
                 {result.protocolEvidence.verdict === 'http2-only' && 'HTTP/2 in use'}
-                {result.protocolEvidence.verdict === null && 'Protocol not observable'}
+                {result.protocolEvidence.verdict === null && 'Protocol evidence is unavailable or inconclusive'}
               </p>
               <p className="text-xs leading-relaxed opacity-90">
                 {result.protocolEvidence.explanation}

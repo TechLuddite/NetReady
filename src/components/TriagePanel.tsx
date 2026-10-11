@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Stethoscope,
   Play,
@@ -44,6 +45,7 @@ import {
  */
 
 interface TriagePanelProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -185,7 +187,7 @@ const FindingCard: React.FC<{ finding: Finding; rank: number }> = ({ finding, ra
   );
 };
 
-export const TriagePanel: React.FC<TriagePanelProps> = ({ onHistoryUpdate }) => {
+export const TriagePanel: React.FC<TriagePanelProps> = ({ onHistoryUpdate, launch }) => {
   const [verdict, setVerdict] = useState<TriageVerdict | null>(null);
   const [progress, setProgress] = useState<TriageProgress | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -237,6 +239,17 @@ export const TriagePanel: React.FC<TriagePanelProps> = ({ onHistoryUpdate }) => 
     }
     execute();
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleRun();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const passed = verdict?.steps.filter((s) => s.status === 'pass').length ?? 0;
 

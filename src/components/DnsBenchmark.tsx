@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Timer,
   Play,
@@ -50,6 +51,7 @@ import { saveHistoryItem, StorageFullError } from '../utils/storage';
  */
 
 interface DnsBenchmarkProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -129,7 +131,7 @@ const MetricCell: React.FC<{ row: ResolverBenchmark; metric: DnsMetricSummary }>
   </td>
 );
 
-export const DnsBenchmark: React.FC<DnsBenchmarkProps> = ({ onHistoryUpdate }) => {
+export const DnsBenchmark: React.FC<DnsBenchmarkProps> = ({ onHistoryUpdate, launch }) => {
   const [result, setResult] = useState<DnsBenchmarkResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState('');
@@ -192,6 +194,17 @@ export const DnsBenchmark: React.FC<DnsBenchmarkProps> = ({ onHistoryUpdate }) =
       abortRef.current = null;
     }
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void run();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const sorted = useMemo(() => {
     if (result === null) return [];
