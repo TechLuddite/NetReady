@@ -101,7 +101,7 @@ export const ResponsibleNetworkingModal: React.FC<ResponsibleNetworkingModalProp
               <span>Ethical Scanning & Diagnostic Standard</span>
             </div>
             <p className="text-slate-300 leading-relaxed text-[11px]">
-              Port scanning, ping testing, socket probing, and traceroute diagnostic tools generate active TCP/UDP or HTTP network requests. You must ensure you have legal authorization before executing tests against external hosts or infrastructure.
+              Port scanning, ping testing, and socket probing tools generate active network requests. You must ensure you have legal authorization before executing tests against external hosts or infrastructure.
             </p>
           </div>
 

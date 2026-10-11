@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import { Server, Play, RefreshCw } from 'lucide-react';
 import { HttpProbeResult, HistoryItem } from '../types';
 import { probeHttpEndpoint } from '../utils/network';
@@ -6,6 +7,7 @@ import { saveHistoryItem } from '../utils/storage';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 
 interface HttpProbeProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -17,8 +19,8 @@ const SAMPLE_PROBES = [
   '/index.html',
 ];
 
-export const HttpProbe: React.FC<HttpProbeProps> = ({ onHistoryUpdate }) => {
-  const [url, setUrl] = useState('https://api.github.com');
+export const HttpProbe: React.FC<HttpProbeProps> = ({ onHistoryUpdate, launch }) => {
+  const [url, setUrl] = useState(launch?.values.url ?? 'https://api.github.com');
   const [isProbing, setIsProbing] = useState(false);
   const [result, setResult] = useState<HttpProbeResult | null>(null);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
@@ -67,6 +69,17 @@ export const HttpProbe: React.FC<HttpProbeProps> = ({ onHistoryUpdate }) => {
     executeProbe(targetUrl);
   };
 
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleRunProbe();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -82,24 +95,6 @@ export const HttpProbe: React.FC<HttpProbeProps> = ({ onHistoryUpdate }) => {
             Test custom web endpoints for status codes, CORS accessibility, TTFB latency, and header security settings directly from the browser.
           </p>
         </div>
-
-        <button
-          onClick={() => handleRunProbe()}
-          disabled={isProbing}
-          className="flex items-center space-x-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50"
-        >
-          {isProbing ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Probing Endpoint...</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>Probe Endpoint</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* Input Form */}
@@ -133,6 +128,24 @@ export const HttpProbe: React.FC<HttpProbeProps> = ({ onHistoryUpdate }) => {
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 font-mono focus:outline-none focus:border-indigo-500"
           />
         </div>
+
+        <button
+          onClick={() => handleRunProbe()}
+          disabled={isProbing}
+          className="flex items-center space-x-2 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50"
+        >
+          {isProbing ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Probing Endpoint...</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>Probe Endpoint</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Results Box */}

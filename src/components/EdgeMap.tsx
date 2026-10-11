@@ -187,14 +187,14 @@ export const EdgeMap: React.FC<EdgeMapProps> = ({
       bounds.push([node.lat, node.lng]);
       L.marker([node.lat, node.lng], {
         icon: L.divIcon({
-          className: 'custom-tracert-marker',
+          className: 'custom-edge-marker',
           html: buildBadge(node),
           iconSize: [28, 28],
           iconAnchor: [14, 14],
         }),
         title: node.label,
       })
-        .bindPopup(buildPopup(node), { className: 'tracert-dark-popup' })
+        .bindPopup(buildPopup(node), { className: 'edge-dark-popup' })
         .addTo(layer);
     }
 

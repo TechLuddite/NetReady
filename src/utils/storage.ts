@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
 };
 
-export const getHistory = (): HistoryItem[] => {
+const readStoredHistory = (): HistoryItem[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_HISTORY);
     if (!raw) return [];
@@ -31,6 +31,10 @@ export const getHistory = (): HistoryItem[] => {
     return [];
   }
 };
+
+/** Keep legacy simulations out of diagnostics and exports without erasing stored records. */
+export const getHistory = (): HistoryItem[] =>
+  readStoredHistory().filter(item => String(item.type) !== 'tracert');
 
 /** Raised when the browser refuses a write because the origin quota is full.
  *  Callers must surface this: silently returning the previous history made a
@@ -50,7 +54,7 @@ const isQuotaError = (e: unknown): boolean =>
   (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED');
 
 export const saveHistoryItem = (item: HistoryItem): HistoryItem[] => {
-  const current = getHistory();
+  const current = readStoredHistory();
   const maxItems = getSettings().maxHistoryItems;
   const updated = [item, ...current].slice(0, maxItems);
 
@@ -84,7 +88,7 @@ export const saveHistoryItem = (item: HistoryItem): HistoryItem[] => {
 
 export const deleteHistoryItem = (id: string): HistoryItem[] => {
   try {
-    const current = getHistory();
+    const current = readStoredHistory();
     const updated = current.filter((item) => item.id !== id);
     localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
     return updated;

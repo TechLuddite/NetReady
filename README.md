@@ -42,18 +42,11 @@ Two rules govern it, and both are tested:
   `indeterminate` — explicitly *not* "your network is fine". A run that measured nothing concludes
   nothing.
 
-### 🎯 Bottleneck attribution
+### Dashboard quick launches
 
-The dashboard headline now names the *binding constraint* rather than showing four flat bars:
-
-> **Grade B — the binding constraint is bufferbloat, not bandwidth.** Latency rose from 18 ms idle
-> to 80 ms under load, an increase of 62 ms.
-
-It is computed by sensitivity analysis over the existing scoring function: each measured input is
-lifted, one at a time, to a level past which it stops limiting the result, and whichever lift moves
-the score furthest is the constraint. Those comparison values live inside the calculation and are
-never reported as measurements — a test asserts they cannot leak into the output. Severe bufferbloat
-overrides the ranking, because the numeric score does not model it and the user's experience does.
+Each tool has a card with its input fields and a run button. Submit a target to open the
+corresponding tool and start it with those values; use Open tool to configure it first.
+Recent diagnostics stored in this browser appear below the cards.
 
 ### 🌍 Dual-stack (IPv4 / IPv6) reachability
 
@@ -220,22 +213,15 @@ Everything a browser can genuinely observe about the path to a host:
   reported rather than shown as zeros.
 - **Which CDN edge answered**, by IATA code, resolved against a bundled airport table to a real
   coordinate. An unknown code is flagged, not guessed.
-- **HTTP/3 negotiation** — if every h3-capable origin falls back to HTTP/2, that is direct evidence
-  UDP/443 is blocked upstream by a firewall or middlebox.
+- **HTTP/3 negotiation** — report the protocols actually negotiated. Missing HTTP/3 does not
+  establish a blocked UDP/443 path: browser settings, server support and protocol discovery can
+  also explain it.
 - **Latency horizon** — light travels ~200 km/ms in fibre, so a round trip puts a hard ceiling on
   how far away a server can be. Drawn as a constraint circle: the endpoint is somewhere inside it.
   This is a proof, not an estimate — queuing delay only loosens the bound.
 
-### 12. 🗺️ Route Model *(simulated — read this)*
-Resolves a target, looks up its real location, and draws a plausible great-circle path to it.
-
-**The intermediate hops are generated, not measured.** Browsers cannot send ICMP packets or set an
-IP TTL, so no web page can perform a real traceroute. The first and last hops are grounded in a real
-DNS resolution and a real geolocation lookup; everything between them is illustrative. Exports mark
-these records as simulated. Use the Edge Path Explorer above for measurements you can rely on.
-
-### 13. 💾 History & Export
-Results persist in `localStorage`. Search, filter, inspect raw JSON, and export per-tool CSVs, a
+### 12. 💾 History & Export
+Results persist in `localStorage`. Legacy simulated route records are excluded from the UI and exports; their stored data is preserved. Search, filter, inspect raw JSON, and export per-tool CSVs, a
 master summary, or a bundled ZIP with a manifest.
 
 ---
@@ -253,6 +239,7 @@ npm run dev      # http://localhost:5173
 npm run build    # static bundle in dist/
 npm run preview
 npm run check    # typecheck + lint + tests
+npm run test:browser # build + browser regression checks (requires Playwright Chromium)
 ```
 
 There is no server component. `npm run build` emits static files that can be hosted anywhere.
@@ -275,7 +262,7 @@ without touching it, so the following go directly from your browser to third par
 | `cloudflare-dns.com`, `dns.google` | Every domain you resolve, over encrypted DoH |
 | `cloudflare-dns.com`, `dns.google`, `dns.quad9.net`, `dns10.quad9.net`, `freedns.controld.com`, `doh.sb`, `public.dns.iij.jp` | Your IP and every name the DNS benchmark queries — ~20 each, most randomly generated, which identifies the run to each provider |
 | `dnssec-failed.org`, `internetsociety.org` | Not contacted; their names are the DNSSEC test pair sent to the resolvers above |
-| `ipwho.is`, `ipapi.co`, `freeipapi.com` | Your public IP on opening the GeoIP tool, and every IP or domain you look up |
+| `ipwho.is`, `ipapi.co` | Your public IP when you run the GeoIP lookup, and every IP or domain you look up |
 | `1.1.1.1`, `one.one.one.one`, `dns.quad9.net`, `doh.opendns.com`, `en.wikipedia.org` | Your IP, as latency probe targets, and as the two halves of the resolver test |
 | `ipv4.icanhazip.com`, `ipv6.icanhazip.com`, `api4.ipify.org`, `api6.ipify.org` | Your IP, during the dual-stack check — each answers on one address family only |
 | `cp.cloudflare.com` | Your IP, during the captive-portal check, and only when NetReady is opened over plain `http` |

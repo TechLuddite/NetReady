@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldQuestion,
   Play,
@@ -31,6 +32,7 @@ import { saveHistoryItem } from '../utils/storage';
  */
 
 interface CaptivePortalCheckProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -73,7 +75,7 @@ const OUTCOME_STYLE: Record<
 const reachabilityWord = (v: boolean | null): string =>
   v === null ? 'not checked' : v ? 'answered' : 'no response';
 
-export const CaptivePortalCheck: React.FC<CaptivePortalCheckProps> = ({ onHistoryUpdate }) => {
+export const CaptivePortalCheck: React.FC<CaptivePortalCheckProps> = ({ onHistoryUpdate, launch }) => {
   const [portal, setPortal] = useState<CaptivePortalResult | null>(null);
   const [dns, setDns] = useState<DnsIntegrityResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -107,6 +109,17 @@ export const CaptivePortalCheck: React.FC<CaptivePortalCheckProps> = ({ onHistor
       setStage('');
     }
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void run();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const failures = [...(portal?.failures ?? []), ...(dns?.failures ?? [])];
 

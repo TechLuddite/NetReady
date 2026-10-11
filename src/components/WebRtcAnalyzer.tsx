@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import { Cpu, Play, RefreshCw, ShieldAlert, Wifi, Globe } from 'lucide-react';
 import { WebRtcResult, HistoryItem } from '../types';
 import { gatherWebRtcCandidates } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
 
 interface WebRtcAnalyzerProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -15,7 +17,7 @@ const STUN_PRESETS = [
   { label: 'Mozilla STUN', url: 'stun:stun.services.mozilla.com' },
 ];
 
-export const WebRtcAnalyzer: React.FC<WebRtcAnalyzerProps> = ({ onHistoryUpdate }) => {
+export const WebRtcAnalyzer: React.FC<WebRtcAnalyzerProps> = ({ onHistoryUpdate, launch }) => {
   const [selectedStun, setSelectedStun] = useState(STUN_PRESETS[0].url);
   const [customStun, setCustomStun] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -50,6 +52,17 @@ export const WebRtcAnalyzer: React.FC<WebRtcAnalyzerProps> = ({ onHistoryUpdate 
     }
   };
 
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleRunScan();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -65,24 +78,6 @@ export const WebRtcAnalyzer: React.FC<WebRtcAnalyzerProps> = ({ onHistoryUpdate 
             Inspect real-time ICE candidate gathering, discover public server-reflexive (srflx) IPs, local host IPs, protocol bindings, and infer NAT firewall types.
           </p>
         </div>
-
-        <button
-          onClick={handleRunScan}
-          disabled={isScanning}
-          className="flex items-center space-x-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-50"
-        >
-          {isScanning ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Gathering Candidates...</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>Inspect ICE Candidates</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* STUN Server Config */}
@@ -124,6 +119,24 @@ export const WebRtcAnalyzer: React.FC<WebRtcAnalyzerProps> = ({ onHistoryUpdate 
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
           />
         </div>
+
+        <button
+          onClick={handleRunScan}
+          disabled={isScanning}
+          className="flex items-center space-x-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-50"
+        >
+          {isScanning ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Gathering Candidates...</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>Inspect ICE Candidates</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Discovered IP Cards */}

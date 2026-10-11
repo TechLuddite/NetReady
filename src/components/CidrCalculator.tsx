@@ -1,3 +1,4 @@
+import type { ToolLaunch } from '../types';
 import React, { useState } from 'react';
 import { Calculator, Copy, CheckCircle2, Bookmark, Layers } from 'lucide-react';
 import { calculateCidr, generateSubnets } from '../utils/cidr';
@@ -5,12 +6,13 @@ import { HistoryItem } from '../types';
 import { saveHistoryItem } from '../utils/storage';
 
 interface CidrCalculatorProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
-export const CidrCalculator: React.FC<CidrCalculatorProps> = ({ onHistoryUpdate }) => {
-  const [ip, setIp] = useState('192.168.1.100');
-  const [prefix, setPrefix] = useState<number>(24);
+export const CidrCalculator: React.FC<CidrCalculatorProps> = ({ onHistoryUpdate, launch }) => {
+  const [ip, setIp] = useState(launch?.values.cidr?.split('/')[0] ?? '192.168.1.100');
+  const [prefix, setPrefix] = useState<number>(Number(launch?.values.cidr?.split('/')[1] ?? 24));
   const [subnetPrefix, setSubnetPrefix] = useState<number>(26);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -52,16 +54,6 @@ export const CidrCalculator: React.FC<CidrCalculatorProps> = ({ onHistoryUpdate 
             100% offline client-side IP subnet calculator. Determines network bounds, broadcast addresses, usable host ranges, binary representation, and subnetting plans.
           </p>
         </div>
-
-        {cidr && (
-          <button
-            onClick={handleSaveToHistory}
-            className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors"
-          >
-            <Bookmark className="w-4 h-4 text-emerald-400" />
-            <span>Save Calculation Log</span>
-          </button>
-        )}
       </div>
 
       {/* Input Form Bar */}
@@ -104,6 +96,16 @@ export const CidrCalculator: React.FC<CidrCalculatorProps> = ({ onHistoryUpdate 
             </div>
           </div>
         </div>
+
+        {cidr && (
+          <button
+            onClick={handleSaveToHistory}
+            className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors"
+          >
+            <Bookmark className="w-4 h-4 text-emerald-400" />
+            <span>Save Calculation Log</span>
+          </button>
+        )}
       </div>
 
       {/* Results View */}

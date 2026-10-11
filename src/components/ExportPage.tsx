@@ -12,7 +12,6 @@ import {
   RefreshCw,
   Copy,
   Check,
-  GitCommit,
   Gauge,
   Radio,
   Radar,
@@ -68,8 +67,6 @@ export const ExportPage: React.FC<ExportPageProps> = ({ onHistoryUpdate }) => {
   // Icon Map Helper
   const renderIcon = (typeId: string, className: string = 'w-5 h-5') => {
     switch (typeId) {
-      case 'tracert':
-        return <GitCommit className={`${className} rotate-90 text-cyan-400`} />;
       case 'speedtest':
         return <Gauge className={`${className} text-amber-400`} />;
       case 'ping':
@@ -225,7 +222,7 @@ export const ExportPage: React.FC<ExportPageProps> = ({ onHistoryUpdate }) => {
             </span>
           </div>
           <p className="text-xs text-slate-400 max-w-xl">
-            Export diagnostic reports for Traceroute, Speed Tests, Port Scans, DNS, and WebRTC. Download individual CSV files per test type or package everything into a single, bundled ZIP archive.
+            Export diagnostic reports for Speed Tests, Port Scans, DNS, and WebRTC. Download individual CSV files per test type or package everything into a single, bundled ZIP archive.
           </p>
         </div>
 

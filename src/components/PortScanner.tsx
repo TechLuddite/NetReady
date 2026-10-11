@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Radar,
   Play,
@@ -16,9 +17,12 @@ import {
 import { PortScanResult, PortStatus, HistoryItem } from '../types';
 import { scanPortList, gatherWebRtcCandidates, describeTargetExpansion } from '../utils/network';
 import { saveHistoryItem } from '../utils/storage';
+import { MAX_SCAN_PORTS, parsePortSelection } from '../utils/ports';
+import { MetricValue } from './MetricValue';
 import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './ResponsibleNetworkingModal';
 
 interface PortScannerProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -41,11 +45,11 @@ const PORT_PRESETS = [
   },
 ];
 
-export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => {
-  const [targetHost, setTargetHost] = useState('127.0.0.1');
+export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate, launch }) => {
+  const [targetHost, setTargetHost] = useState(launch?.values.target ?? '127.0.0.1');
   const [selectedPreset, setSelectedPreset] = useState<string>('Web & Development');
-  const [customPortInput, setCustomPortInput] = useState('80, 443, 3000-3005, 8080');
-  const [portSelectionMode, setPortSelectionMode] = useState<'preset' | 'custom'>('preset');
+  const [customPortInput, setCustomPortInput] = useState(launch?.values.ports ?? '80, 443, 3000-3005, 8080');
+  const [portSelectionMode, setPortSelectionMode] = useState<'preset' | 'custom'>(launch?.values.ports ? 'custom' : 'preset');
 
   const [showBetaDetails, setShowBetaDetails] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
@@ -61,47 +65,27 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     phase: 'scanning',
   });
   const [activeResult, setActiveResult] = useState<PortScanResult | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'all' | 'open' | 'closed' | 'filtered'>('all');
-  const [hideOfflineHosts, setHideOfflineHosts] = useState(true);
+  const [filterStatus, setFilterStatus] = useState<'all' | PortStatus['status']>('all');
+  const [hideUnresponsiveHosts, setHideUnresponsiveHosts] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [detectingSubnet, setDetectingSubnet] = useState(false);
   const [detectedSubnetInfo, setDetectedSubnetInfo] = useState<string | null>(null);
   const truncationWarning = useMemo(() => describeTargetExpansion(targetHost), [targetHost]);
   const [showResponsibleModal, setShowResponsibleModal] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
 
-  // Helper to parse comma separated ports or ranges e.g. "80, 443, 3000-3010"
-  const parsePortsToScan = (): number[] => {
-    if (portSelectionMode === 'preset') {
-      const p = PORT_PRESETS.find((item) => item.name === selectedPreset);
-      return p ? p.ports : [80, 443, 3000, 8080];
-    }
-
-    const portsSet = new Set<number>();
-    const rawParts = customPortInput.split(',');
-
-    for (const raw of rawParts) {
-      const part = raw.trim();
-      if (part.includes('-')) {
-        const [startStr, endStr] = part.split('-');
-        const start = parseInt(startStr, 10);
-        const end = parseInt(endStr, 10);
-        if (!isNaN(start) && !isNaN(end) && start > 0 && end <= 65535 && start <= end) {
-          const count = Math.min(100, end - start + 1);
-          for (let i = 0; i < count; i++) {
-            portsSet.add(start + i);
-          }
-        }
-      } else {
-        const num = parseInt(part, 10);
-        if (!isNaN(num) && num > 0 && num <= 65535) {
-          portsSet.add(num);
-        }
+  const portSelection = useMemo(() => {
+    try {
+      if (portSelectionMode === 'preset') {
+        const preset = PORT_PRESETS.find(item => item.name === selectedPreset);
+        if (!preset) throw new Error('Choose a port preset.');
+        return { ports: preset.ports, error: null };
       }
+      return { ports: parsePortSelection(customPortInput), error: null };
+    } catch (error) {
+      return { ports: [], error: error instanceof Error ? error.message : 'Invalid port selection.' };
     }
-
-    const list = Array.from(portsSet).sort((a, b) => a - b);
-    return list.length > 0 ? list : [80, 443, 3000, 8080];
-  };
+  }, [portSelectionMode, selectedPreset, customPortInput]);
 
   const handleAutoDetectSubnet = async () => {
     setDetectingSubnet(true);
@@ -140,12 +124,17 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
   };
 
   const executeScan = async () => {
-    const portsToScan = parsePortsToScan();
-    if (!targetHost.trim() || portsToScan.length === 0) return;
+    if (portSelection.error) return;
+    if (!targetHost.trim()) {
+      setScanError('Enter a target host, subnet, or IP range.');
+      return;
+    }
+    const portsToScan = portSelection.ports;
+    setScanError(null);
 
     setIsScanning(true);
     setActiveResult(null);
-    setScanProgress({ scanned: 0, total: 100 });
+    setScanProgress({ scanned: 0, total: 0 });
 
     try {
       const res = await scanPortList(targetHost, portsToScan, (scanned, total, last, phase) => {
@@ -166,7 +155,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
         type: 'portscanner',
         timestamp: res.timestamp,
         title: `Port Scan: ${res.targetHost}`,
-        summary: `Hosts: ${res.scannedHosts.length} | Open Ports: ${res.openPortsCount} | Closed: ${res.closedPortsCount} | Filtered: ${res.filteredPortsCount} (${res.scanDurationMs}ms)`,
+        summary: `Host targets: ${res.scannedHosts.length} | Open (heuristic): ${res.openPortsCount} | Closed: ${res.closedPortsCount} | Filtered: ${res.filteredPortsCount} | Not tested: ${res.ports.filter(p => p.status === 'not-tested').length} (${res.scanDurationMs}ms)`,
         data: res,
       };
 
@@ -174,12 +163,19 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
       onHistoryUpdate();
     } catch (e) {
       console.error('Port scan error:', e);
+      setScanError(e instanceof Error ? `The scan could not finish: ${e.message}` : 'The scan could not finish.');
     } finally {
       setIsScanning(false);
     }
   };
 
   const handleStartScan = () => {
+    if (portSelection.error) return;
+    if (!targetHost.trim()) {
+      setScanError('Enter a target host, subnet, or IP range.');
+      return;
+    }
+    setScanError(null);
     if (!isResponsibleNetworkingAccepted()) {
       setShowResponsibleModal(true);
       return;
@@ -187,8 +183,19 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
     executeScan();
   };
 
-  // Calculate sets of totally offline/unresponsive hosts (where 100% of probed ports are 'filtered')
-  const offlineHostsSet = useMemo(() => {
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void handleStartScan();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
+
+  // Unanswered probes do not prove a host is offline; never hide untested entries.
+  const unresponsiveHostsSet = useMemo(() => {
     if (!activeResult) return new Set<string>();
     const hostStatusMap: Record<string, { total: number; filtered: number }> = {};
     for (const p of activeResult.ports) {
@@ -211,12 +218,12 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
 
   const filteredPorts = activeResult
     ? activeResult.ports.filter((p) => {
-        // If hideOfflineHosts is enabled and scanning multiple hosts, hide totally unresponsive hosts unless viewing filtered specifically
+        // A user may hide unanswered probes, but untested entries remain visible.
         if (
-          hideOfflineHosts &&
-          filterStatus !== 'filtered' &&
+          hideUnresponsiveHosts &&
+          filterStatus === 'all' &&
           activeResult.scannedHosts.length > 1 &&
-          offlineHostsSet.has(p.host)
+          unresponsiveHostsSet.has(p.host)
         ) {
           return false;
         }
@@ -271,24 +278,6 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
             Scan host IPs, local dev servers, or entire CIDR subnets (e.g. <code className="text-cyan-300 font-mono">192.168.1.0/24</code>) for open TCP/Web services directly within your browser, complete with host IP identification and direct HTTP/HTTPS hyperlinks.
           </p>
         </div>
-
-        <button
-          onClick={handleStartScan}
-          disabled={isScanning}
-          className="relative z-10 flex items-center space-x-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-[0_0_20px_rgba(8,145,178,0.3)] active:scale-95 disabled:opacity-50 cursor-pointer"
-        >
-          {isScanning ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Scanning Subnet / Ports...</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 fill-white" />
-              <span>Launch Scan</span>
-            </>
-          )}
-        </button>
       </div>
 
       {/* BETA Security & Certificate Notice Banner */}
@@ -386,7 +375,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
               type="text"
               placeholder="e.g. 192.168.1.0/24, 10.0.0.1-20, 127.0.0.1, or scanme.nmap.org"
               value={targetHost}
-              onChange={(e) => setTargetHost(e.target.value)}
+              onChange={(e) => { setTargetHost(e.target.value); setScanError(null); }}
               className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-100 font-mono focus:outline-none focus:border-cyan-500 shadow-inner"
             />
           </div>
@@ -492,16 +481,40 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
               <input
                 type="text"
                 value={customPortInput}
-                onChange={(e) => setCustomPortInput(e.target.value)}
+                onChange={(e) => { setCustomPortInput(e.target.value); setScanError(null); }}
                 placeholder="e.g. 80, 443, 3000-3010, 8080"
                 className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
               />
               <p className="text-[11px] text-slate-500 font-mono">
-                Enter comma-separated ports or range pairs (e.g., <code className="text-cyan-400">80, 443, 3000-3010</code>).
+                Enter comma-separated ports or ranges (e.g., <code className="text-cyan-400">80, 443, 3000-3010</code>). Maximum {MAX_SCAN_PORTS} distinct ports; larger selections are rejected.
               </p>
             </div>
           )}
         </div>
+
+        {(portSelection.error || scanError) && (
+          <p role="alert" className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3">
+            {portSelection.error ?? scanError}
+          </p>
+        )}
+
+        <button
+          onClick={handleStartScan}
+          disabled={isScanning || portSelection.error !== null}
+          className="relative z-10 flex items-center space-x-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-6 py-3 rounded-xl text-sm transition-all shadow-[0_0_20px_rgba(8,145,178,0.3)] active:scale-95 disabled:opacity-50 cursor-pointer"
+        >
+          {isScanning ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Scanning Subnet / Ports...</span>
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4 fill-white" />
+              <span>Launch Scan</span>
+            </>
+          )}
+        </button>
       </div>
 
       {/* Live Scan Progress Bar */}
@@ -554,18 +567,18 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                 Target: {activeResult.targetHost}
               </div>
               <div className="text-xs text-slate-400 font-mono mt-1">
-                Scanned {activeResult.scannedHosts.length} host IP(s) across {activeResult.scannedPorts.length} port(s) in {activeResult.scanDurationMs} ms &bull; {new Date(activeResult.timestamp).toLocaleString()}
+                Processed {activeResult.scannedHosts.length} host target(s) with {activeResult.scannedPorts.length} requested port(s) in {activeResult.scanDurationMs} ms &bull; {new Date(activeResult.timestamp).toLocaleString()}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-center w-full lg:w-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 font-mono text-center w-full lg:w-auto">
               <div className="bg-cyan-500/10 border border-cyan-500/30 px-4 py-3 rounded-xl">
-                <div className="text-[10px] uppercase font-bold text-cyan-400">Active Devices</div>
+                <div className="text-[10px] uppercase font-bold text-cyan-400">Hosts answered</div>
                 <div className="text-2xl font-bold text-cyan-300">{activeResult.discoveredHostsCount}</div>
               </div>
 
               <div className="bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 rounded-xl">
-                <div className="text-[10px] uppercase font-bold text-emerald-400">Open Ports</div>
+                <div className="text-[10px] uppercase font-bold text-emerald-400">Open (heuristic)</div>
                 <div className="text-2xl font-bold text-emerald-300">{activeResult.openPortsCount}</div>
               </div>
 
@@ -578,8 +591,17 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                 <div className="text-[10px] uppercase font-bold text-amber-400">Filtered Ports</div>
                 <div className="text-2xl font-bold text-amber-300">{activeResult.filteredPortsCount}</div>
               </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 px-4 py-3 rounded-xl">
+                <div className="text-[10px] uppercase font-bold text-slate-400">Not tested</div>
+                <div className="text-2xl font-bold text-slate-300">{activeResult.ports.filter(p => p.status === 'not-tested').length}</div>
+              </div>
             </div>
           </div>
+
+          <p className="text-xs text-slate-400">
+            Open, closed, and filtered are browser timing heuristics, not confirmed TCP port states.
+            Not tested means no probe ran. — means no latency was measured.
+          </p>
 
           {/* Discovered Subnet Devices Summary Card */}
           {openDevicesList.length > 0 && (
@@ -641,7 +663,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
               <div className="flex items-center space-x-1.5 bg-slate-950 p-1 rounded-xl border border-white/10 text-xs font-mono">
-                {(['all', 'open', 'closed', 'filtered'] as const).map((status) => (
+                {(['all', 'open', 'closed', 'filtered', 'not-tested'] as const).map((status) => (
                   <button
                     key={status}
                     onClick={() => setFilterStatus(status)}
@@ -651,23 +673,23 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {status} ({status === 'all' ? activeResult.ports.length : activeResult.ports.filter((p) => p.status === status).length})
+                    {status === 'not-tested' ? 'Not tested' : status} ({status === 'all' ? activeResult.ports.length : activeResult.ports.filter((p) => p.status === status).length})
                   </button>
                 ))}
               </div>
 
               {activeResult.scannedHosts.length > 1 && (
                 <button
-                  onClick={() => setHideOfflineHosts(!hideOfflineHosts)}
+                  onClick={() => setHideUnresponsiveHosts(!hideUnresponsiveHosts)}
                   className={`px-3 py-1.5 rounded-xl border text-xs font-mono transition-colors flex items-center space-x-1.5 cursor-pointer ${
-                    hideOfflineHosts
+                    hideUnresponsiveHosts
                       ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
                       : 'bg-slate-950 border-white/10 text-slate-400 hover:text-slate-200'
                   }`}
-                  title="Toggle hiding unresponsive host IPs from subnet scan results"
+                  title="Hide hosts whose requested probes were all unanswered; this does not prove they are offline."
                 >
                   <Filter className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Hide Offline Hosts ({offlineHostsSet.size})</span>
+                  <span>Hide unanswered hosts ({unresponsiveHostsSet.size})</span>
                 </button>
               )}
             </div>
@@ -693,7 +715,7 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                   <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Port</th>
                   <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Status</th>
                   <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Service Name</th>
-                  <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Latency RTT</th>
+                  <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Probe latency</th>
                   <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Web Service Link</th>
                   <th className="py-3 px-4 uppercase text-[10px] tracking-wider font-semibold">Description</th>
                 </tr>
@@ -741,10 +763,12 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                                 : p.status === 'closed'
                                 ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : p.status === 'filtered'
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
                             }`}
                           >
-                            {p.status}
+                            {p.status === 'not-tested' ? 'Not tested' : p.status}
                           </span>
                         </td>
 
@@ -752,7 +776,14 @@ export const PortScanner: React.FC<PortScannerProps> = ({ onHistoryUpdate }) => 
                         <td className="py-3 px-4 text-cyan-300 font-semibold">{p.service || 'Unknown'}</td>
 
                         {/* Latency RTT Column */}
-                        <td className="py-3 px-4 text-slate-300">{p.latencyMs} ms</td>
+                        <td className="py-3 px-4 text-slate-300">
+                          <MetricValue value={p.latencyMs} unit="ms" />
+                          {p.latencyMs === null && (
+                            <p className="mt-1 text-[10px] text-slate-500">
+                              {p.description || (p.status === 'not-tested' ? 'No probe ran for this port.' : 'No response latency could be measured.')}
+                            </p>
+                          )}
+                        </td>
 
                         {/* Hyperlink Column for HTTP/HTTPS scan results */}
                         <td className="py-3 px-4">

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { RULES, THRESHOLDS } from './rules';
 import { evaluateRules } from './engine';
 import { createSnapshot } from './snapshot';
+import { assessProtocols } from '../utils/edgePath';
 import type {
   CaptivePortalResult,
   DnsIntegrityResult,
@@ -266,7 +267,7 @@ describe('cdn reachability rules', () => {
 });
 
 describe('protocol rules', () => {
-  it('fires on HTTP/3 falling back to HTTP/2', () => {
+  it('treats absent HTTP/3 as possible explanations rather than a measured fault', () => {
     const s = createSnapshot({
       edge: edge({
         protocolEvidence: {
@@ -279,10 +280,36 @@ describe('protocol rules', () => {
         },
       }),
     });
-    expect(fired(s)).toContain('udp-443-blocked');
+    const finding = evaluateRules(s).find((f) => f.ruleId === 'udp-443-blocked');
+    expect(finding).toBeDefined();
+    expect(finding!.confidence).toBe('possible');
+    expect(finding!.severity).toBe('informational');
+    expect(finding!.verdict).not.toMatch(/browser tried|fell back|being blocked/);
+    expect(finding!.verdict).toContain('do not establish which cause');
   });
 
-  it('fires on a total fallback to HTTP/1.1', () => {
+  it('quotes mixed protocols without claiming every response was HTTP/2', () => {
+    const probes = [
+      { ...edgeProbe('a', 'available'), protocol: 'h2' },
+      { ...edgeProbe('b', 'available'), protocol: 'http/1.1' },
+    ];
+    const s = createSnapshot({ edge: edge({ probes, protocolEvidence: assessProtocols(probes) }) });
+    const finding = evaluateRules(s).find((f) => f.ruleId === 'udp-443-blocked');
+    expect(finding!.evidence[0].observation).toBe(
+      'HTTP/2 responses: 1; HTTP/1.x responses: 1; HTTP/3 responses: 0',
+    );
+    expect(finding!.confidence).toBe('possible');
+  });
+
+  it('draws no protocol finding from unknown or unreadable evidence', () => {
+    for (const protocol of ['unknown', null]) {
+      const probes = [{ ...edgeProbe('a', 'available'), protocol }];
+      const s = createSnapshot({ edge: edge({ probes, protocolEvidence: assessProtocols(probes) }) });
+      expect(fired(s)).toEqual([]);
+    }
+  });
+
+  it('treats observed HTTP/1.x as a possible cause with no claimed fallback', () => {
     const s = createSnapshot({
       edge: edge({
         protocolEvidence: {
@@ -295,7 +322,11 @@ describe('protocol rules', () => {
         },
       }),
     });
-    expect(fired(s)).toContain('legacy-http1');
+    const finding = evaluateRules(s).find((f) => f.ruleId === 'legacy-http1');
+    expect(finding).toBeDefined();
+    expect(finding!.confidence).toBe('possible');
+    expect(finding!.severity).toBe('informational');
+    expect(finding!.verdict).not.toContain('fell back');
   });
 
   it('stays quiet when HTTP/3 works', () => {

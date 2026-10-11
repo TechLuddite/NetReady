@@ -1,4 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   ArrowUpDown,
   Footprints,
@@ -75,6 +76,7 @@ import { StorageFullError, saveHistoryItem } from '../utils/storage';
  */
 
 interface WalkTestProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -286,11 +288,11 @@ const DestinationCard: React.FC<DestinationCardProps> = ({
   );
 };
 
-export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate }) => {
+export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate, launch }) => {
   const [isWalking, setIsWalking] = useState(false);
   const [samples, setSamples] = useState<WalkSample[]>([]);
   const [waypoints, setWaypoints] = useState<WalkWaypoint[]>([]);
-  const [spotName, setSpotName] = useState('');
+  const [spotName, setSpotName] = useState(launch?.values.spot ?? '');
   const [intervalMs, setIntervalMs] = useState<number>(DEFAULT_INTERVAL_MS);
   const [sortKey, setSortKey] = useState<SortKey>('median');
   const [result, setResult] = useState<WalkTestResult | null>(null);
@@ -306,6 +308,11 @@ export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate }) => {
   const currentWaypointIdRef = useRef<string>('');
   const abortRef = useRef<AbortController | null>(null);
   const startedAtRef = useRef<number>(0);
+
+  useEffect(() => () => {
+    // A walk is continuous; leaving the tool must end its background probes.
+    abortRef.current?.abort();
+  }, []);
 
   const targets = WALK_TARGETS;
 
@@ -353,6 +360,17 @@ export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate }) => {
       abortRef.current = null;
     }
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void start();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const stop = () => {
     abortRef.current?.abort();
@@ -575,6 +593,22 @@ export const WalkTest: React.FC<WalkTestProps> = ({ onHistoryUpdate }) => {
             </p>
           </div>
         </div>
+
+        {!isWalking && (
+          <div>
+            <label htmlFor="walk-start-spot" className="block text-xs text-slate-400 mb-1">
+              Starting spot (optional)
+            </label>
+            <input
+              id="walk-start-spot"
+              value={spotName}
+              onChange={(e) => setSpotName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void start()}
+              placeholder="e.g. living room"
+              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-teal-500/60"
+            />
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           {isWalking ? (

@@ -5,7 +5,6 @@ export type ToolTab =
   | 'dualstack'
   | 'captive'
   | 'edgepath'
-  | 'tracert'
   | 'portscanner'
   | 'geoip'
   | 'speedtest'
@@ -19,6 +18,13 @@ export type ToolTab =
   | 'websocket'
   | 'history'
   | 'export';
+
+/** A deliberate dashboard submission, consumed once by the destination tool. */
+export interface ToolLaunch {
+  id: number;
+  tab: ToolTab;
+  values: Record<string, string>;
+}
 
 export interface NetworkConnectionInfo {
   downlink?: number; // Mbps
@@ -201,19 +207,20 @@ export interface WebSocketResult {
   id: string;
   timestamp: number;
   url: string;
-  handshakeTimeMs: number;
+  handshakeTimeMs: number | null;
   pings: number[];
-  avgPingMs: number;
+  avgPingMs: number | null;
   status: 'connected' | 'error' | 'closed';
   messagesSent: number;
   messagesReceived: number;
+  failures?: MeasurementFailure[];
 }
 
 export interface PortStatus {
   host: string;
   port: number;
-  status: 'open' | 'closed' | 'filtered';
-  latencyMs: number;
+  status: 'open' | 'closed' | 'filtered' | 'not-tested';
+  latencyMs: number | null;
   service?: string;
   description?: string;
   isWeb?: boolean;
@@ -236,40 +243,6 @@ export interface PortScanResult {
   scanEngine?: 'server' | 'browser';
 }
 
-export interface TracertHop {
-  hop: number;
-  ip: string;
-  hostname: string;
-  rtt1: number; // ms (-1 if timeout)
-  rtt2: number;
-  rtt3: number;
-  avgRtt: number;
-  status: 'success' | 'slow' | 'timeout';
-  lat: number;
-  lng: number;
-  city: string;
-  region: string;
-  country: string;
-  countryCode: string;
-  isp: string;
-  asn: string;
-  nodeType: 'client' | 'gateway' | 'isp_pop' | 'transit' | 'backbone' | 'datacenter' | 'destination';
-}
-
-export interface TracertResult {
-  id: string;
-  timestamp: number;
-  targetHost: string;
-  targetIp: string;
-  protocol: 'ICMP' | 'UDP' | 'TCP';
-  maxHops: number;
-  totalHops: number;
-  totalDistanceKm: number;
-  avgLatencyMs: number;
-  totalTimeMs: number;
-  hops: TracertHop[];
-}
-
 export interface GeoIpResult {
   id: string;
   timestamp: number;
@@ -281,16 +254,16 @@ export interface GeoIpResult {
   countryCode: string;
   flag?: string;
   postal?: string;
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   timezone?: string;
   isp: string;
   org?: string;
   asn?: string;
   callingCode?: string;
   currency?: string;
-  isProxy?: boolean;
-  isVpn?: boolean;
+  isProxy?: boolean | null;
+  isVpn?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -381,9 +354,8 @@ export interface EdgeClientView {
 }
 
 /**
- * Evidence about HTTP/3 support. A network that blocks UDP/443 forces a fallback
- * to HTTP/2 even against origins that advertise h3, which is directly
- * observable and worth surfacing.
+ * Observed negotiated protocols. Lack of HTTP/3 does not reveal whether the
+ * browser attempted QUIC, or whether UDP/443 is blocked.
  */
 export interface ProtocolEvidence {
   /** Protocols negotiated across all probed origins, deduplicated. */
@@ -837,7 +809,6 @@ export interface HistoryItem {
     | 'cidr'
     | 'mac'
     | 'portscanner'
-    | 'tracert'
     | 'geoip'
     | 'edgepath'
     | 'triage'

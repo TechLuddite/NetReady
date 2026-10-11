@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Gauge,
   Play,
@@ -18,10 +19,11 @@ import { ResponsibleNetworkingModal, isResponsibleNetworkingAccepted } from './R
 import { MetricValue, FailureNotice, displayMetric } from './MetricValue';
 
 interface SpeedTestProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
-export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
+export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate, launch }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState<'idle' | 'ping' | 'download' | 'upload' | 'complete'>('idle');
   const [progress, setProgress] = useState(0);
@@ -126,6 +128,17 @@ export const SpeedTest: React.FC<SpeedTestProps> = ({ onHistoryUpdate }) => {
     }
     executeTest();
   };
+
+  const launchedIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (launch === undefined || launchedIdRef.current === launch.id) return;
+    // Defer until mount effects settle so StrictMode cannot cancel the only run.
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launch.id;
+      void startTest();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const getBufferbloatColor = (grade?: string | null) => {
     switch (grade) {

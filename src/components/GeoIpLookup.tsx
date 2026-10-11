@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import type { ToolLaunch } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MapPin,
   Search,
@@ -7,7 +8,6 @@ import {
   ExternalLink,
   Copy,
   Check,
-  RefreshCw,
   Navigation,
   Server,
   Radio,
@@ -18,16 +18,45 @@ import { GeoIpResult } from '../types';
 import { saveHistoryItem } from '../utils/storage';
 
 interface GeoIpLookupProps {
+  launch?: ToolLaunch;
   onHistoryUpdate?: () => void;
 }
 
-export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => {
-  const [inputQuery, setInputQuery] = useState('');
+interface GeoApiResponse {
+  ip?: string;
+  success?: boolean;
+  error?: boolean;
+  city?: string;
+  region?: string;
+  country?: string;
+  country_name?: string;
+  country_code?: string;
+  flag?: { emoji?: string };
+  postal?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  timezone?: string | { id?: string; utc?: string };
+  connection?: { isp?: string; org?: string; asn?: number };
+  security?: { proxy?: boolean | null; vpn?: boolean | null };
+  org?: string;
+  asn?: string;
+  calling_code?: string | number;
+  country_calling_code?: string;
+  currency?: string | { code?: string; symbol?: string };
+}
+
+// Missing, invalid, and out-of-range coordinates cannot place a map marker.
+const coordinate = (value: unknown, limit: number): number | null =>
+  typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit ? value : null;
+
+export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate, launch }) => {
+  const [inputQuery, setInputQuery] = useState(launch?.values.target ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GeoIpResult | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activeQuickTab, setActiveQuickTab] = useState<string>('myip');
+  const [activeQuickTab, setActiveQuickTab] = useState<string>(launch?.values.target ? '' : 'myip');
+  const latestLookupRef = useRef(0);
 
   // Helper to resolve domain to IP via DNS over HTTPS if domain entered
   const resolveDomainToIp = async (query: string): Promise<string> => {
@@ -44,9 +73,9 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
     try {
       const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(clean)}&type=A`);
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json() as { Answer?: { type: number; data: string }[] };
         if (data.Answer && data.Answer.length > 0) {
-          const aRecord = data.Answer.find((ans: any) => ans.type === 1);
+          const aRecord = data.Answer.find((ans) => ans.type === 1);
           if (aRecord && aRecord.data) {
             return aRecord.data;
           }
@@ -59,8 +88,10 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
   };
 
   const performLookup = async (targetIpOrDomain?: string) => {
+    const lookupId = ++latestLookupRef.current;
     setLoading(true);
     setError(null);
+    setResult(null);
 
     const rawQuery = targetIpOrDomain !== undefined ? targetIpOrDomain : inputQuery;
     const cleanQuery = rawQuery.trim();
@@ -72,7 +103,7 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
       }
 
       // Try Primary Geolocation API: ipwho.is (Supports HTTPS & CORS)
-      let geoData: any = null;
+      let geoData: Omit<GeoIpResult, 'id' | 'timestamp' | 'query'> | null = null;
       let apiSuccess = false;
 
       const primaryUrl = targetIp
@@ -82,8 +113,8 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
       try {
         const response = await fetch(primaryUrl);
         if (response.ok) {
-          const json = await response.json();
-          if (json && json.success !== false) {
+          const json = await response.json() as GeoApiResponse;
+          if (json?.ip && json.success !== false) {
             geoData = {
               ip: json.ip,
               city: json.city || 'Unknown City',
@@ -92,16 +123,19 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
               countryCode: json.country_code || 'UN',
               flag: json.flag?.emoji || '🌐',
               postal: json.postal || 'N/A',
-              lat: json.latitude || 0,
-              lng: json.longitude || 0,
-              timezone: json.timezone?.id ? `${json.timezone.id} (${json.timezone.utc || ''})` : 'UTC',
+              lat: coordinate(json.latitude, 90),
+              lng: coordinate(json.longitude, 180),
+              timezone: typeof json.timezone === 'object' && json.timezone?.id
+                ? `${json.timezone.id}${json.timezone.utc ? ` (${json.timezone.utc})` : ''}`
+                : undefined,
               isp: json.connection?.isp || json.connection?.org || 'Unknown ISP',
               org: json.connection?.org || json.connection?.isp || '',
               asn: json.connection?.asn ? `AS${json.connection.asn}` : '',
               callingCode: json.calling_code ? `+${json.calling_code}` : '',
-              currency: json.currency ? `${json.currency.code} (${json.currency.symbol || ''})` : '',
-              isProxy: json.security?.proxy || false,
-              isVpn: json.security?.vpn || false,
+              currency: typeof json.currency === 'object' && json.currency
+                ? `${json.currency.code ?? ''} (${json.currency.symbol ?? ''})` : '',
+              isProxy: typeof json.security?.proxy === 'boolean' ? json.security.proxy : null,
+              isVpn: typeof json.security?.vpn === 'boolean' ? json.security.vpn : null,
             };
             apiSuccess = true;
           }
@@ -119,8 +153,8 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
           
           const fallbackRes = await fetch(fallbackUrl);
           if (fallbackRes.ok) {
-            const json = await fallbackRes.json();
-            if (json && !json.error) {
+            const json = await fallbackRes.json() as GeoApiResponse;
+            if (json?.ip && !json.error) {
               geoData = {
                 ip: json.ip,
                 city: json.city || 'Unknown City',
@@ -129,16 +163,16 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                 countryCode: json.country_code || 'UN',
                 flag: '🌐',
                 postal: json.postal || 'N/A',
-                lat: json.latitude || 0,
-                lng: json.longitude || 0,
-                timezone: json.timezone || 'UTC',
+                lat: coordinate(json.latitude, 90),
+                lng: coordinate(json.longitude, 180),
+                timezone: typeof json.timezone === 'string' ? json.timezone : undefined,
                 isp: json.org || json.asn || 'Unknown ISP',
                 org: json.org || '',
                 asn: json.asn || '',
                 callingCode: json.country_calling_code || '',
-                currency: json.currency || '',
-                isProxy: false,
-                isVpn: false,
+                currency: typeof json.currency === 'string' ? json.currency : '',
+                isProxy: null,
+                isVpn: null,
               };
               apiSuccess = true;
             }
@@ -159,6 +193,7 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
         ...geoData,
       };
 
+      if (lookupId !== latestLookupRef.current) return;
       setResult(lookupResult);
 
       // Save to global storage history
@@ -174,17 +209,26 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
       if (onHistoryUpdate) {
         onHistoryUpdate();
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during GeoIP lookup.');
+    } catch (err) {
+      if (lookupId === latestLookupRef.current) {
+        setError(err instanceof Error ? err.message : 'An error occurred during GeoIP lookup.');
+      }
     } finally {
-      setLoading(false);
+      if (lookupId === latestLookupRef.current) setLoading(false);
     }
   };
 
-  // Perform initial lookup on mount for user's own public IP
+  const launchedIdRef = useRef<number | null>(null);
   useEffect(() => {
-    performLookup('');
-  }, []);
+    if (launch === undefined) return;
+    const launchId = launch.id;
+    if (launchedIdRef.current === launchId) return;
+    const timer = window.setTimeout(() => {
+      launchedIdRef.current = launchId;
+      void performLookup(launch?.values.target ?? '');
+    }, 0);
+    return () => window.clearTimeout(timer);
+  });
 
   const handlePresetSelect = (ip: string, tabName: string) => {
     setActiveQuickTab(tabName);
@@ -194,7 +238,7 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
 
   const handleCopy = () => {
     if (!result) return;
-    const text = `IP: ${result.ip}\nLocation: ${result.city}, ${result.region}, ${result.country}\nCoordinates: ${result.lat}, ${result.lng}\nISP: ${result.isp}\nASN: ${result.asn || 'N/A'}`;
+    const text = `IP: ${result.ip}\nLocation: ${result.city}, ${result.region}, ${result.country}\nCoordinates: ${result.lat ?? 'unavailable'}, ${result.lng ?? 'unavailable'}\nISP: ${result.isp}\nASN: ${result.asn || 'N/A'}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -221,15 +265,6 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
               Inspect physical geolocation coordinates, Autonomous System Number (ASN), Internet Service Provider (ISP), timezone, and proxy/VPN security status for any IPv4/IPv6 address or domain.
             </p>
           </div>
-
-          <button
-            onClick={() => performLookup(inputQuery)}
-            disabled={loading}
-            className="flex items-center space-x-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-cyan-500/20 active:scale-95 disabled:opacity-50 shrink-0 cursor-pointer"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            <span>{loading ? 'Querying...' : 'Refresh GeoIP'}</span>
-          </button>
         </div>
 
         {/* Input Controls & Quick Targets */}
@@ -257,7 +292,7 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
               disabled={loading}
               className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-semibold text-xs px-5 py-3 rounded-xl transition-all cursor-pointer shrink-0"
             >
-              Lookup Address
+              {loading ? 'Querying...' : 'Lookup Address'}
             </button>
           </form>
 
@@ -410,8 +445,11 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                     Coordinates
                   </span>
                   <span className="text-sm font-bold font-mono text-emerald-400 block">
-                    {result.lat.toFixed(4)}, {result.lng.toFixed(4)}
+                    {result.lat?.toFixed(4) ?? '—'}, {result.lng?.toFixed(4) ?? '—'}
                   </span>
+                  {(result.lat === null || result.lng === null) && (
+                    <p className="text-[10px] text-slate-500 mt-1">The geolocation provider did not return coordinates.</p>
+                  )}
                 </div>
 
                 {/* Timezone */}
@@ -420,8 +458,11 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                     Timezone
                   </span>
                   <span className="text-xs font-semibold font-mono text-slate-200 block truncate">
-                    {result.timezone || 'UTC'}
+                    {result.timezone || '—'}
                   </span>
+                  {!result.timezone && (
+                    <p className="text-[10px] text-slate-500 mt-1">The geolocation provider did not return a timezone.</p>
+                  )}
                 </div>
 
                 {/* Calling Code */}
@@ -492,12 +533,14 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                   <span className="text-slate-400">Proxy Detected</span>
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      result.isProxy
+                      result.isProxy == null
+                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : result.isProxy
                         ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                         : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                     }`}
                   >
-                    {result.isProxy ? 'YES' : 'NO'}
+                    {result.isProxy == null ? '—' : result.isProxy ? 'YES' : 'NO'}
                   </span>
                 </div>
 
@@ -505,12 +548,14 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                   <span className="text-slate-400">VPN Node</span>
                   <span
                     className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      result.isVpn
+                      result.isVpn == null
+                        ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                        : result.isVpn
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                         : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                     }`}
                   >
-                    {result.isVpn ? 'YES' : 'NO'}
+                    {result.isVpn == null ? '—' : result.isVpn ? 'YES' : 'NO'}
                   </span>
                 </div>
 
@@ -521,11 +566,15 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                   </span>
                 </div>
               </div>
+              {(result.isProxy == null || result.isVpn == null) && (
+                <p className="text-[11px] text-slate-500">Unavailable security signals were not returned by the geolocation provider.</p>
+              )}
             </div>
           </div>
 
           {/* Right Column: Geographic Map Coordinates & External Link (1 Col) */}
           <div className="space-y-6">
+            {result.lat !== null && result.lng !== null ? (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
@@ -566,7 +615,7 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                 {/* Overlay Badge */}
                 <div className="absolute bottom-2 left-2 right-2 bg-slate-950/90 border border-slate-800 backdrop-blur-md rounded-lg p-2 text-[10px] font-mono text-slate-300 flex items-center justify-between pointer-events-none">
                   <span className="truncate">Lat: {result.lat.toFixed(4)}, Lng: {result.lng.toFixed(4)}</span>
-                  <span className="text-emerald-400 font-bold shrink-0 ml-1">Verified Location</span>
+                  <span className="text-emerald-400 font-bold shrink-0 ml-1">Provider estimate</span>
                 </div>
               </div>
 
@@ -583,6 +632,11 @@ export const GeoIpLookup: React.FC<GeoIpLookupProps> = ({ onHistoryUpdate }) => 
                 </a>
               </div>
             </div>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-xs text-slate-400">
+                Map unavailable: the geolocation provider did not return coordinates.
+              </div>
+            )}
 
             {/* Documentation Note */}
             <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-4 text-[11px] text-slate-400 space-y-2">

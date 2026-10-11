@@ -1,3 +1,4 @@
+import type { ToolLaunch } from '../types';
 import React, { useState } from 'react';
 import { Search, Copy, CheckCircle2, Bookmark } from 'lucide-react';
 import { parseAndLookupMac } from '../utils/oui';
@@ -5,6 +6,7 @@ import { HistoryItem } from '../types';
 import { saveHistoryItem } from '../utils/storage';
 
 interface MacLookupProps {
+  launch?: ToolLaunch;
   onHistoryUpdate: () => void;
 }
 
@@ -17,8 +19,8 @@ const SAMPLE_MACS = [
   { label: 'Ubiquiti AP', mac: '80:2A:A8:11:22:33' },
 ];
 
-export const MacLookup: React.FC<MacLookupProps> = ({ onHistoryUpdate }) => {
-  const [inputMac, setInputMac] = useState('DC:A6:32:00:11:22');
+export const MacLookup: React.FC<MacLookupProps> = ({ onHistoryUpdate, launch }) => {
+  const [inputMac, setInputMac] = useState(launch?.values.mac ?? 'DC:A6:32:00:11:22');
   const [copied, setCopied] = useState(false);
 
   const lookupResult = parseAndLookupMac(inputMac);
@@ -58,16 +60,6 @@ export const MacLookup: React.FC<MacLookupProps> = ({ onHistoryUpdate }) => {
             Offline hardware vendor detection engine using IEEE Organizationally Unique Identifier (OUI) dictionary parsing.
           </p>
         </div>
-
-        {lookupResult.isKnown && (
-          <button
-            onClick={handleSaveToHistory}
-            className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors"
-          >
-            <Bookmark className="w-4 h-4 text-rose-400" />
-            <span>Save Lookup Log</span>
-          </button>
-        )}
       </div>
 
       {/* Input Form */}
@@ -98,6 +90,16 @@ export const MacLookup: React.FC<MacLookupProps> = ({ onHistoryUpdate }) => {
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-base text-slate-100 font-mono focus:outline-none focus:border-rose-500"
           />
         </div>
+
+        {lookupResult.isKnown && (
+          <button
+            onClick={handleSaveToHistory}
+            className="flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-semibold transition-colors"
+          >
+            <Bookmark className="w-4 h-4 text-rose-400" />
+            <span>Save Lookup Log</span>
+          </button>
+        )}
       </div>
 
       {/* Result Display */}

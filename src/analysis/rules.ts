@@ -251,26 +251,26 @@ export const RULES: Rule[] = [
 
   {
     id: 'udp-443-blocked',
-    title: 'HTTP/3 is being forced back to HTTP/2',
+    title: 'HTTP/3 was not observed',
     layer: 'local-network',
     consumes: ['edge.protocolEvidence'],
     evaluate: (s) => {
       if (s.edge?.protocolEvidence.verdict !== 'http3-absent-udp-possibly-blocked') return null;
       const e = s.edge.protocolEvidence;
+      if (e.h3Count > 0 || e.h2Count + e.http1Count === 0) return null;
       return {
-        confidence: 'likely',
-        severity: 'degrading',
+        confidence: 'possible',
+        severity: 'informational',
         verdict:
-          'Every origin that advertises HTTP/3 was reached over HTTP/2 instead. The browser tried ' +
-          'QUIC and fell back, which points at UDP port 443 being blocked upstream. Things still ' +
-          'work; they just lose the faster, loss-resilient path.',
+          'The readable responses used other protocols. Browser settings, protocol discovery, ' +
+          'connection reuse, or a blocked UDP path could explain the absence of HTTP/3; ' +
+          'these measurements do not establish which cause applies.',
         remediation: [
-          'Check the router or firewall for a rule blocking outbound UDP 443 — some "QUIC blocking" toggles are on by default.',
-          'On a corporate network this is often deliberate, to keep traffic inspectable.',
-          'The cost is mainly on lossy links such as mobile and congested Wi-Fi.',
+          'Check whether the browser enables HTTP/3 and repeat the probes after protocol discovery.',
+          'If HTTP/3 works on another network with the same browser, check router or firewall settings for outbound UDP restrictions.',
         ],
         evidence: [
-          ev('edge.protocolEvidence', `${e.h2Count} origin(s) negotiated h2, none negotiated h3`),
+          ev('edge.protocolEvidence', `HTTP/2 responses: ${e.h2Count}; HTTP/1.x responses: ${e.http1Count}; HTTP/3 responses: ${e.h3Count}`),
         ],
       };
     },
@@ -278,21 +278,22 @@ export const RULES: Rule[] = [
 
   {
     id: 'legacy-http1',
-    title: 'Every connection fell back to HTTP/1.1',
+    title: 'Only HTTP/1.x was observed',
     layer: 'local-network',
     consumes: ['edge.protocolEvidence'],
     evaluate: (s) => {
       if (s.edge?.protocolEvidence.verdict !== 'legacy-http1') return null;
+      const e = s.edge.protocolEvidence;
+      if (e.http1Count === 0 || e.h2Count > 0 || e.h3Count > 0) return null;
       return {
-        confidence: 'likely',
-        severity: 'degrading',
+        confidence: 'possible',
+        severity: 'informational',
         verdict:
-          'Nothing negotiated better than HTTP/1.1, though all of these origins support HTTP/2. ' +
-          'A proxy or TLS-inspecting middlebox in the path is the usual reason, and it costs both ' +
-          'throughput and latency.',
+          'The readable responses used HTTP/1.x. Browser settings, server configuration, ' +
+          'or a proxy may explain this; the measurements do not identify the cause.',
         remediation: [
-          'Look for an explicit proxy configured in the OS or browser network settings.',
-          'On a managed device, an inspection appliance is likely doing this deliberately.',
+          'Compare another browser and check its protocol settings.',
+          'Check for a configured proxy if the same destinations use newer protocols elsewhere.',
         ],
         evidence: [
           ev(
