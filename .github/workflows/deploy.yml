@@ -31,6 +31,25 @@ jobs:
       - run: npm run lint
       - run: npm run test
 
+  # Luddite Scout reads the checkout: agent instruction files, hidden Unicode,
+  # Actions, dependencies and build-time code. It runs nothing from this
+  # repository. Fails on any HIGH or MEDIUM finding and on a check that could
+  # not finish. Deployment does not depend on it, so a newly published
+  # advisory fails this job without stopping a release.
+  scout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: TechLuddite/luddite-scout-action@b34b6a811b70e99c51a8e9b1f4a1aeecc786d99d
+        with:
+          fail-on: medium
+          name: ${{ github.repository }}
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+
   deploy:
     needs: check
     if: github.event_name != 'pull_request'
